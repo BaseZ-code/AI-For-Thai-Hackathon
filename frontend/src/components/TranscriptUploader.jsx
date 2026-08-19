@@ -25,31 +25,33 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef(null)
 
-  // In-Browser Live Mic Recording State
+  // In-Browser Live Mic Recording State (Pure LINEAR16 PCM WAV)
   const [isRecording, setIsRecording] = useState(false)
   const [recordSeconds, setRecordSeconds] = useState(0)
   const [audioLevel, setAudioLevel] = useState(0) // 0 - 100 for live visualizer
   const [micStatus, setMicStatus] = useState('idle') // 'idle' | 'requesting' | 'recording' | 'recorded'
 
-  const mediaRecorderRef = useRef(null)
-  const audioChunksRef = useRef([])
   const timerIntervalRef = useRef(null)
-  const animFrameRef = useRef(null)
   const audioContextRef = useRef(null)
   const analyserRef = useRef(null)
+  const processorNodeRef = useRef(null)
   const streamRef = useRef(null)
+  const pcmSamplesRef = useRef([])
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopAllAudioTracks()
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
       if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl)
     }
   }, [audioPreviewUrl])
 
   function stopAllAudioTracks() {
+    if (processorNodeRef.current) {
+      try { processorNodeRef.current.disconnect() } catch (_) {}
+      processorNodeRef.current = null
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop())
       streamRef.current = null
@@ -70,7 +72,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
     setMicStatus('requesting')
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setError('Live microphone recording is not supported in this browser context (requires localhost or HTTPS). Please use file upload.')
+      setError('Live microphone recording requires HTTPS or localhost. Please use audio file upload below.')
       setMicStatus('idle')
       return
     }
@@ -78,87 +80,58 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
+          channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
         } 
       })
       streamRef.current = stream
-      audioChunksRef.current = []
+      pcmSamplesRef.current = []
 
-      // Setup Web Audio API visualizer
-      try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext
-        const audioCtx = new AudioCtx()
-        audioContextRef.current = audioCtx
-        const analyser = audioCtx.createAnalyser()
-        analyser.fftSize = 256
-        analyser.smoothingTimeConstant = 0.6
-        analyserRef.current = analyser
+      // Setup Web Audio API PCM capture (16kHz mono LINEAR16 for Google Cloud STT)
+      const AudioCtx = window.AudioContext || window.webkitAudioContext
+      const audioCtx = new AudioCtx()
+      audioContextRef.current = audioCtx
+      const inputSampleRate = audioCtx.sampleRate
 
-        const sourceNode = audioCtx.createMediaStreamSource(stream)
-        sourceNode.connect(analyser)
+      const sourceNode = audioCtx.createMediaStreamSource(stream)
+      
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.5
+      analyserRef.current = analyser
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      // Use 4096 sample buffer for smooth PCM streaming
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1)
+      processorNodeRef.current = processor
 
-        const updateVisualizer = () => {
-          if (!analyserRef.current) return
-          analyserRef.current.getByteFrequencyData(dataArray)
+      const freqData = new Uint8Array(analyser.frequencyBinCount)
+
+      processor.onaudioprocess = e => {
+        if (!isRecording && micStatus !== 'recording') return
+        const inputData = e.inputBuffer.getChannelData(0)
+        
+        // Clone input samples for WAV encoding
+        const copy = new Float32Array(inputData.length)
+        copy.set(inputData)
+        pcmSamplesRef.current.push(copy)
+
+        // Calculate real-time voice decibel level
+        if (analyserRef.current) {
+          analyserRef.current.getByteFrequencyData(freqData)
           let sum = 0
-          for (let i = 0; i < dataArray.length; i++) {
-            sum += dataArray[i]
-          }
-          const avg = sum / dataArray.length
+          for (let i = 0; i < freqData.length; i++) sum += freqData[i]
+          const avg = sum / freqData.length
           const normalized = Math.min(100, Math.round((avg / 128) * 100))
           setAudioLevel(normalized)
-          animFrameRef.current = requestAnimationFrame(updateVisualizer)
-        }
-        updateVisualizer()
-      } catch (vizErr) {
-        console.warn('AudioContext visualizer setup failed (recording still works):', vizErr)
-      }
-
-      // Safe MediaRecorder initialization with codec fallback
-      let mimeType = ''
-      let fileExt = 'wav'
-      if (typeof MediaRecorder !== 'undefined') {
-        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-          mimeType = 'audio/webm;codecs=opus'
-          fileExt = 'webm'
-        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4'
-          fileExt = 'm4a'
-        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-          mimeType = 'audio/webm'
-          fileExt = 'webm'
         }
       }
 
-      let mediaRecorder
-      try {
-        mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
-      } catch (_) {
-        mediaRecorder = new MediaRecorder(stream)
-      }
-      mediaRecorderRef.current = mediaRecorder
+      sourceNode.connect(analyser)
+      analyser.connect(processor)
+      processor.connect(audioCtx.destination)
 
-      mediaRecorder.ondataavailable = e => {
-        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data)
-      }
-
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/wav' })
-        const file = new File([audioBlob], `mic-recording-${Date.now()}.${fileExt === 'webm' ? 'm4a' : fileExt}`, { 
-          type: mimeType || 'audio/wav' 
-        })
-        setAudioFile(file)
-        const url = URL.createObjectURL(audioBlob)
-        setAudioPreviewUrl(url)
-        setMicStatus('recorded')
-        stopAllAudioTracks()
-      }
-
-      mediaRecorder.start(200) // 200ms slice interval
       setIsRecording(true)
       setMicStatus('recording')
       setRecordSeconds(0)
@@ -169,22 +142,58 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
       console.error('Microphone error:', err)
       setMicStatus('idle')
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setError('Microphone permission was denied. Please click the 🔒 icon in your browser address bar and enable Microphone access.')
+        setError('Microphone permission was denied. Please click the 🔒 / 🎙️ icon in your address bar and allow access.')
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setError('No microphone found on this device. Please connect a microphone or use file upload.')
+        setError('No microphone found on this device. Please connect a microphone or upload a file.')
       } else {
-        setError(`Microphone error (${err.name || 'Error'}): ${err.message}. Please use file upload.`)
+        setError(`Microphone error (${err.name || 'Error'}): ${err.message}. Please use audio file upload.`)
       }
     }
   }
 
   function stopRecording() {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop()
-      setIsRecording(false)
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
-      setAudioLevel(0)
+    if (!isRecording) return
+    setIsRecording(false)
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
+    setAudioLevel(0)
+
+    try {
+      const inputSampleRate = audioContextRef.current ? audioContextRef.current.sampleRate : 44100
+      const totalLength = pcmSamplesRef.current.reduce((acc, curr) => acc + curr.length, 0)
+      
+      if (totalLength === 0) {
+        setError('No audio captured. Please speak into the microphone and try again.')
+        setMicStatus('idle')
+        stopAllAudioTracks()
+        return
+      }
+
+      // Merge all sample chunks into single Float32 buffer
+      const merged = new Float32Array(totalLength)
+      let offset = 0
+      for (const chunk of pcmSamplesRef.current) {
+        merged.set(chunk, offset)
+        offset += chunk.length
+      }
+
+      // Downsample to 16,000 Hz (Optimal target for Google Cloud STT LINEAR16)
+      const targetSampleRate = 16000
+      const downsampled = downsampleBuffer(merged, inputSampleRate, targetSampleRate)
+
+      // Encode standard 16-bit PCM WAV (LINEAR16)
+      const wavBlob = encodeWAV(downsampled, targetSampleRate)
+      const file = new File([wavBlob], `voice-call-${Date.now()}.wav`, { type: 'audio/wav' })
+      
+      setAudioFile(file)
+      const url = URL.createObjectURL(wavBlob)
+      setAudioPreviewUrl(url)
+      setMicStatus('recorded')
+    } catch (encErr) {
+      console.error('WAV encoding error:', encErr)
+      setError(`Audio encoding error: ${encErr.message}`)
+      setMicStatus('idle')
+    } finally {
+      stopAllAudioTracks()
     }
   }
 
@@ -204,7 +213,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
   function handleAudioFileSelected(file) {
     if (!file) return
     const ext = file.name.split('.').pop().toLowerCase()
-    if (!['mp3', 'wav', 'm4a', 'flac', 'ogg', 'webm'].includes(ext)) {
+    if (!['mp3', 'wav', 'm4a', 'flac', 'ogg'].includes(ext)) {
       setError(`Unsupported format .${ext}. Please upload .mp3, .wav, .m4a, or .flac`)
       return
     }
@@ -271,7 +280,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>🎙️ Voice Audio & Transcript Ingestion</div>
             <div style={{ fontSize: 11, color: 'var(--zd-text-muted)', marginTop: 2 }}>
-              Record live speech via mic, upload audio files (.wav/.mp3), or paste dialogue
+              Record live speech via mic (LINEAR16 PCM), upload audio files, or paste dialogue
             </div>
           </div>
           <button
@@ -403,7 +412,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
                         {isRecording ? `🔴 Live Recording Voice (${fmtTime(recordSeconds)})` : (micStatus === 'requesting' ? 'Requesting Mic Access…' : 'Record Thai Voice Call Directly via Mic')}
                       </div>
                       <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                        {isRecording ? 'Listening to voice… Speak naturally in Thai' : 'Click Start to record voice for Speech-to-Text extraction'}
+                        {isRecording ? 'Capturing LINEAR16 16kHz PCM audio… Speak naturally in Thai' : 'Click Start to record voice for Speech-to-Text extraction'}
                       </div>
                     </div>
                   </div>
@@ -484,7 +493,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
                       <span style={{ fontSize: 18 }}>🎧</span>
                       <div>
                         <div style={{ fontSize: 12, fontWeight: 700, color: '#166534' }}>
-                          Voice Recorded ({audioFile ? (audioFile.size / 1024).toFixed(1) + ' KB' : 'Ready'})
+                          Voice Recorded ({audioFile ? (audioFile.size / 1024).toFixed(1) + ' KB' : 'Ready'} · WAV PCM)
                         </div>
                         <div style={{ fontSize: 10, color: '#15803d' }}>Ready to transcribe via Google Cloud ASR</div>
                       </div>
@@ -514,7 +523,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="audio/mp3,audio/wav,audio/m4a,audio/flac,audio/ogg,audio/webm"
+                  accept="audio/mp3,audio/wav,audio/m4a,audio/flac,audio/ogg"
                   onChange={e => e.target.files?.[0] && handleAudioFileSelected(e.target.files[0])}
                   style={{ display: 'none' }}
                 />
@@ -619,4 +628,66 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
       </div>
     </div>
   )
+}
+
+// ── Helpers: Pure 16-bit LINEAR16 PCM WAV Encoder ──────────────────
+
+function downsampleBuffer(buffer, inputSampleRate, outputSampleRate = 16000) {
+  if (inputSampleRate === outputSampleRate) return buffer
+  const sampleRateRatio = inputSampleRate / outputSampleRate
+  const newLength = Math.round(buffer.length / sampleRateRatio)
+  const result = new Float32Array(newLength)
+  let offsetResult = 0
+  let offsetBuffer = 0
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio)
+    let accum = 0, count = 0
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+      accum += buffer[i]
+      count++
+    }
+    result[offsetResult] = count > 0 ? accum / count : 0
+    offsetResult++
+    offsetBuffer = nextOffsetBuffer
+  }
+  return result
+}
+
+function encodeWAV(samples, sampleRate = 16000) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2)
+  const view = new DataView(buffer)
+
+  // RIFF chunk descriptor
+  writeString(view, 0, 'RIFF')
+  view.setUint32(4, 36 + samples.length * 2, true)
+  writeString(view, 8, 'WAVE')
+
+  // "fmt " sub-chunk
+  writeString(view, 12, 'fmt ')
+  view.setUint32(16, 16, true) // SubChunk1Size (16 for PCM)
+  view.setUint16(20, 1, true)  // AudioFormat (1 = LINEAR PCM)
+  view.setUint16(22, 1, true)  // NumChannels (1 = Mono)
+  view.setUint32(24, sampleRate, true) // SampleRate (16000)
+  view.setUint32(28, sampleRate * 2, true) // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
+  view.setUint16(32, 2, true)  // BlockAlign (NumChannels * BitsPerSample/8)
+  view.setUint16(34, 16, true) // BitsPerSample (16-bit)
+
+  // "data" sub-chunk
+  writeString(view, 36, 'data')
+  view.setUint32(40, samples.length * 2, true)
+
+  // Write 16-bit PCM integer samples
+  let offset = 44
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true)
+  }
+
+  return new Blob([view], { type: 'audio/wav' })
+}
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i))
+  }
 }

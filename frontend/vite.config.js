@@ -1,8 +1,8 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Deployed backend — from DEPLOY_GUIDE.md
-const PROD_API = 'http://team8.105app.site'
+// Deployed backend — HTTPS enabled
+const PROD_API = 'https://team8.105app.site'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')

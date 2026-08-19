@@ -13,7 +13,7 @@ const BASE = '/v1'
 // The resolved API target injected by Vite at build time (defined in vite.config.js)
 // Falls back gracefully if not available (e.g. in tests)
 export const API_TARGET =
-  typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : 'http://team8.105app.site'
+  typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : 'https://team8.105app.site'
 
 /**
  * Helper to ensure source matches backend Literal["line", "facebook", "other"]
