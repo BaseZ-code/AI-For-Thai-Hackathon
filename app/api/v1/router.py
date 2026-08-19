@@ -7,8 +7,10 @@ from fastapi import APIRouter
 from app.api.health import health_router
 from app.api.v1.chat import chat_router
 from app.api.v1.audio import audio_router
+from app.api.v1.line import line_router
 
 v1_router = APIRouter()
 v1_router.include_router(health_router, tags=["Health"])
 v1_router.include_router(chat_router, tags=["Chat"])
 v1_router.include_router(audio_router, tags=["Audio"])
+v1_router.include_router(line_router, tags=["LINE"])
