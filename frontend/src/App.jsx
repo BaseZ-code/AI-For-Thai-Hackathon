@@ -195,15 +195,19 @@ export default function App() {
     setTranscriptHistory(prev => [entry, ...prev].slice(0, 5))
   }
 
-  // Reset entire session for a fresh demo run
+  // Reset entire session for a fresh demo run (clears chat console & ChaiToke)
   function handleResetDemo() {
     setCallState('active')
+    setCallDuration('—')
     setChaiState('waiting')
+    setLiveMessages([])
+    setTranscript({ source: 'call_center', messages: [] })
     setMapped(null)
     setRawResult(null)
     setPushed(false)
     setCustomerFields(null)
     setApiError(null)
+    setActiveTab('apps')
   }
 
   return (
@@ -339,7 +343,7 @@ export default function App() {
                   cursor: 'pointer',
                 }}
               >
-                🔄 Reset Call
+                🔄 Reset Session
               </button>
             )}
           </div>
