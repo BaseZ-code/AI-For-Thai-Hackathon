@@ -91,33 +91,24 @@ export default function App() {
     if (transcriptMode === 'live') {
       const messagesToSend = liveMessages.length > 0 ? liveMessages : DEFAULT_TRANSCRIPT.messages
       targetPayload = {
-        source: 'line',
+        source: 'other',
         messages: messagesToSend,
       }
     } else {
       targetPayload = transcript
     }
 
-    const isOnline = backendStatus === 'online'
-
     try {
-      let result
-      if (isOnline) {
-        result = await extractFromMessages(targetPayload.messages, targetPayload.source)
-        setIsOffline(false)
-      } else {
-        await new Promise(r => setTimeout(r, 1200))
-        result = MOCK_RESPONSE
-        setIsOffline(true)
-      }
+      // Always call the live server API directly
+      const result = await extractFromMessages(targetPayload.messages, targetPayload.source)
+      setIsOffline(false)
       setRawResult(result)
       setMapped(mapResponse(result))
       setChaiState('results')
     } catch (err) {
       console.error('ChaiToke API error:', err)
-      await new Promise(r => setTimeout(r, 800))
       setIsOffline(true)
-      setApiError(`API error ${err.status || 500}: ${err.title || err.message || 'Offline fallback'}`)
+      setApiError(`API error ${err.status || 500}: ${err.detail || err.title || err.message}`)
       setRawResult(MOCK_RESPONSE)
       setMapped(mapResponse(MOCK_RESPONSE))
       setChaiState('results')

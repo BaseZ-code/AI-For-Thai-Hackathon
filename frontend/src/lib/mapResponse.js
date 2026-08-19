@@ -44,32 +44,40 @@ export function mapResponse({ data = {}, meta = {} }) {
   const bluf       = acw.bluf_note         || {}
   const intent     = data.intent           || {}
   const senti      = data.sentiment        || {}
+  const entities   = data.entities         || []
 
   const sentInfo   = SENTIMENT_EMOJI[senti.overall] || { emoji: '❓', label: senti.overall || '—' }
   const prioInfo   = PRIORITY_COLOURS[crm.priority] || { label: crm.priority || 'Normal', colour: 'blue' }
   
-  // Format BLUF note fallback
+  // Find entities if identity is not yet populated by backend LLM
+  const entPhone   = entities.find(e => e.type === 'phone_number')?.value
+  const entOrder   = entities.find(e => e.type === 'order_id')?.value
+  const entName    = entities.find(e => e.type === 'person_name')?.value
+  const entProduct = entities.find(e => e.type === 'product_name')?.value
+
+  const phone      = identity.customer_phone || crm.phone || entPhone || null
+  const invoiceNo  = identity.order_invoice_no || crm.order_id || entOrder || null
+  const productSku = identity.product_sku_model || entProduct || null
+  const custName   = crm.customer_name || entName || null
+  const isOfflineFallback = meta.model === 'offline-unidentified-fallback' || meta.model === 'demo-offline'
+
+  // Format BLUF note
   const blufFormatted = bluf.formatted_text || (
     bluf.bottom_line
       ? `[BLUF]: ${bluf.bottom_line}\n• Context: ${bluf.context || 'N/A'}\n• Next Steps: ${bluf.next_steps || 'N/A'}`
-      : `[BLUF]: ${triage.incident_description || 'Customer inquiry recorded.'}\n• Status: ${acw.ticket_status || 'Pending'}\n• Action: ${acw.action_deadline || 'Within 48h'}`
+      : `[BLUF]: Case recorded for ${phone || custName || 'Customer'}.\n• Category: ${triage.furniture_damage_type || crm.issue_category || intent.primary || 'General'}\n• Status: ${acw.ticket_status || 'Pending'} · Priority: ${prioInfo.label} (${sentInfo.label})\n• Next Steps: ${acw.action_deadline || 'Ticket logged in CRM.'}`
   )
-
-  const phone = identity.customer_phone || crm.phone || null
-  const invoiceNo = identity.order_invoice_no || crm.order_id || null
-  const productSku = identity.product_sku_model || null
-  const isOfflineFallback = meta.model === 'offline-unidentified-fallback' || meta.model === 'demo-offline'
 
   return {
     // Identity fields
-    customerName:     crm.customer_name || (isOfflineFallback ? '[UNIDENTIFIED_CUSTOMER]' : '—'),
+    customerName:     custName || (isOfflineFallback ? '[UNIDENTIFIED_CUSTOMER]' : '—'),
     phone:            phone || (isOfflineFallback ? '[UNIDENTIFIED_PHONE]' : '—'),
     invoiceNo:        invoiceNo || (isOfflineFallback ? '[UNIDENTIFIED_INVOICE]' : '—'),
     productSku:       productSku || (isOfflineFallback ? '[UNIDENTIFIED_PRODUCT]' : '—'),
 
     // Triage & Escalation
-    damageType:       triage.furniture_damage_type || null,
-    damageTypeLabel:  DAMAGE_TYPE_LABELS[triage.furniture_damage_type] || triage.furniture_damage_type || (isOfflineFallback ? '[UNIDENTIFIED_DAMAGE]' : null),
+    damageType:       triage.furniture_damage_type || crm.issue_category || null,
+    damageTypeLabel:  DAMAGE_TYPE_LABELS[triage.furniture_damage_type] || triage.furniture_damage_type || crm.issue_category || (isOfflineFallback ? '[UNIDENTIFIED_DAMAGE]' : null),
     photosReceived:   Boolean(triage.photo_evidence_received),
     incidentDesc:     triage.incident_description || null,
     
@@ -97,7 +105,7 @@ export function mapResponse({ data = {}, meta = {} }) {
 
     // Customer Tab fields for CRM Push
     customerTabFields: {
-      name:           crm.customer_name || (isOfflineFallback ? '[UNIDENTIFIED_CUSTOMER]' : '—'),
+      name:           custName || (isOfflineFallback ? '[UNIDENTIFIED_CUSTOMER]' : 'Demo User'),
       phone:          phone || (isOfflineFallback ? '[UNIDENTIFIED_PHONE]' : '—'),
       invoiceNo:      invoiceNo || (isOfflineFallback ? '[UNIDENTIFIED_INVOICE]' : '—'),
       productSku:     productSku || (isOfflineFallback ? '[UNIDENTIFIED_PRODUCT]' : '—'),
@@ -111,7 +119,7 @@ export function mapResponse({ data = {}, meta = {} }) {
       blufNote:       blufFormatted,
     },
 
-    entities: data.entities || [],
+    entities: entities,
     rawTranscript: meta.raw_transcript || null,
     reconstructedTranscript: data.reconstructed_transcript || null,
   }
