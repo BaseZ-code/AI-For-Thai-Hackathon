@@ -84,6 +84,31 @@ export default function CustomerTab({ fields, pushed }) {
         </div>
       </div>
 
+      {/* Customer Mood Detection */}
+      {fields?.moodLevel && (
+        <div>
+          <SectionTitle>Customer Mood & Sentiment</SectionTitle>
+          <div style={{ background:'white', border:'1px solid var(--zd-border)', borderRadius:8, padding:12, display:'flex', flexDirection:'column', gap:8 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontSize:11, color:'var(--zd-text-muted)', fontWeight:600 }}>Detected Mood</span>
+              <span style={{ fontSize:11, fontWeight:700, color: fields?.sentimentScore < -0.15 ? '#dc2626' : fields?.sentimentScore > 0.2 ? '#16a34a' : '#374151' }}>
+                {fields?.sentiment || '—'} ({fields?.moodLevel})
+              </span>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontSize:11, color:'var(--zd-text-muted)', fontWeight:600 }}>Emotional Tone</span>
+              <span style={{ fontSize:11, fontWeight:600, color:'#4b5563' }}>{fields?.moodTone || '—'}</span>
+            </div>
+            {fields?.moodRecommendation && (
+              <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:6, padding:'6px 8px', fontSize:11, color:'#334155', lineHeight:1.4 }}>
+                <span style={{ fontWeight:700, color:'#0f172a' }}>💡 Recommended Response: </span>
+                {fields.moodRecommendation}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* BLUF Note Preview */}
       {fields?.blufNote && (
         <div>

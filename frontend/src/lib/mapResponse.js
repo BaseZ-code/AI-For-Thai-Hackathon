@@ -68,6 +68,28 @@ export function mapResponse({ data = {}, meta = {} }) {
       : `[BLUF]: Case recorded for ${phone || custName || 'Customer'}.\n• Category: ${triage.furniture_damage_type || crm.issue_category || intent.primary || 'General'}\n• Status: ${acw.ticket_status || 'Pending'} · Priority: ${prioInfo.label} (${sentInfo.label})\n• Next Steps: ${acw.action_deadline || 'Ticket logged in CRM.'}`
   )
 
+  // Sentiment & Mood Detection
+  const sentimentScore = typeof senti.score === 'number' ? senti.score : (senti.overall === 'negative' ? -0.33 : (senti.overall === 'positive' ? 0.65 : 0.0))
+  const sentimentOverall = senti.overall || 'neutral'
+  
+  let moodTone = 'Objective / Inquiry'
+  let moodRecommendation = 'Proceed with standard triage intake and verify receipt details.'
+  let moodLevel = 'Calm'
+
+  if (sentimentOverall === 'negative' || sentimentScore < -0.15) {
+    moodTone = 'High Friction / Frustrated'
+    moodRecommendation = 'Lead with empathy. Acknowledge damage inconvenience, confirm 1-to-1 swap warranty, and provide explicit 48-hr SLA.'
+    moodLevel = 'Frustrated / Upset'
+  } else if (sentimentOverall === 'positive' || sentimentScore > 0.25) {
+    moodTone = 'Appreciative / Cooperative'
+    moodRecommendation = 'Reinforce HomePro service commitment and thank customer for HomeCard membership.'
+    moodLevel = 'Satisfied'
+  } else if (sentimentOverall === 'mixed') {
+    moodTone = 'Conflicted / Awaiting Resolution'
+    moodRecommendation = 'Clarify outstanding points, reassure customer, and verify photo proof in LINE OA.'
+    moodLevel = 'Mixed'
+  }
+
   return {
     // Identity fields
     customerName:     custName || (isOfflineFallback ? '[UNIDENTIFIED_CUSTOMER]' : '—'),
@@ -94,9 +116,14 @@ export function mapResponse({ data = {}, meta = {} }) {
     blufNote:         bluf,
     blufFormatted:    blufFormatted,
 
-    // Standard sentiment & priority
+    // Standard sentiment & Mood Detection
     sentimentEmoji:   sentInfo.emoji,
     sentimentLabel:   sentInfo.label,
+    sentimentScore:   sentimentScore,
+    sentimentOverall: sentimentOverall,
+    moodTone:         moodTone,
+    moodRecommendation: moodRecommendation,
+    moodLevel:        moodLevel,
     priorityLabel:    prioInfo.label,
     priorityColour:   prioInfo.colour,
     confidence:       intent.confidence != null ? Math.round(intent.confidence * 100) : null,
@@ -116,6 +143,10 @@ export function mapResponse({ data = {}, meta = {} }) {
       priority:       prioInfo.label,
       priorityColour: prioInfo.colour,
       sentiment:      `${sentInfo.emoji} ${sentInfo.label}`,
+      sentimentScore: sentimentScore,
+      moodLevel:      moodLevel,
+      moodTone:       moodTone,
+      moodRecommendation: moodRecommendation,
       blufNote:       blufFormatted,
     },
 

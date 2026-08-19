@@ -217,6 +217,59 @@ export default function ChaiTokeCard({ chaiState, mapped, rawResult, isOffline, 
                       </div>
                     </div>
 
+                    {/* Customer Mood & Sentiment Detection Card */}
+                    <div style={{
+                      background: mapped.sentimentOverall === 'negative' ? '#fff1f2' : mapped.sentimentOverall === 'positive' ? '#f0fdf4' : '#f8fafc',
+                      border: `1px solid ${mapped.sentimentOverall === 'negative' ? '#fecdd3' : mapped.sentimentOverall === 'positive' ? '#bbf7d0' : '#e2e8f0'}`,
+                      borderRadius: 6, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                          Customer Mood & Tone
+                        </div>
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4,
+                          color: mapped.sentimentOverall === 'negative' ? '#e11d48' : mapped.sentimentOverall === 'positive' ? '#16a34a' : '#475569',
+                        }}>
+                          {mapped.sentimentEmoji} {mapped.moodLevel || mapped.sentimentLabel}
+                        </span>
+                      </div>
+
+                      {/* Visual Sentiment Spectrum Bar */}
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#94a3b8', fontWeight: 600, marginBottom: 3 }}>
+                          <span>Upset (-1.0)</span>
+                          <span style={{ fontWeight: 700, color: '#334155' }}>Score: {typeof mapped.sentimentScore === 'number' ? mapped.sentimentScore.toFixed(2) : '0.00'}</span>
+                          <span>Delighted (+1.0)</span>
+                        </div>
+                        <div style={{ height: 6, width: '100%', borderRadius: 99, background: 'linear-gradient(90deg, #f87171, #fbbf24, #4ade80)', position: 'relative', overflow: 'hidden' }}>
+                          <div style={{
+                            position: 'absolute',
+                            top: 0,
+                            bottom: 0,
+                            left: `${Math.max(5, Math.min(95, ((mapped.sentimentScore + 1) / 2) * 100))}%`,
+                            width: 6,
+                            borderRadius: '50%',
+                            background: '#0f172a',
+                            boxShadow: '0 0 4px rgba(0,0,0,0.5)',
+                            transform: 'translateX(-50%)',
+                          }} />
+                        </div>
+                      </div>
+
+                      {/* Empathy Recommendation */}
+                      {mapped.moodRecommendation && (
+                        <div style={{
+                          fontSize: 10.5, lineHeight: 1.4, color: '#334155',
+                          background: 'rgba(255,255,255,0.7)', borderRadius: 4, padding: '4px 6px',
+                          border: '1px solid rgba(0,0,0,0.05)',
+                        }}>
+                          <span style={{ fontWeight: 700, color: 'var(--ct-dark)' }}>💡 Agent Empathy Tip: </span>
+                          {mapped.moodRecommendation}
+                        </div>
+                      )}
+                    </div>
+
                     {/* Triage & Escalation Pills */}
                     <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
                       <div>
