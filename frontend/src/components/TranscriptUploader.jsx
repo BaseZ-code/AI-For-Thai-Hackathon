@@ -38,9 +38,14 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
   const streamRef = useRef(null)
   const pcmSamplesRef = useRef([])
 
+  const isRecordingRef = useRef(false)
+  const animFrameRef = useRef(null)
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      isRecordingRef.current = false
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
       stopAllAudioTracks()
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
       if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl)
@@ -89,57 +94,67 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
       streamRef.current = stream
       pcmSamplesRef.current = []
 
-      // Setup Web Audio API PCM capture (16kHz mono LINEAR16 for Google Cloud STT)
+      // Setup Web Audio API PCM capture
       const AudioCtx = window.AudioContext || window.webkitAudioContext
       const audioCtx = new AudioCtx()
       audioContextRef.current = audioCtx
-      const inputSampleRate = audioCtx.sampleRate
+
+      // Explicitly resume audio context (required by Chrome autoplay policy)
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume()
+      }
 
       const sourceNode = audioCtx.createMediaStreamSource(stream)
       
       const analyser = audioCtx.createAnalyser()
       analyser.fftSize = 256
-      analyser.smoothingTimeConstant = 0.5
+      analyser.smoothingTimeConstant = 0.4
       analyserRef.current = analyser
 
-      // Use 4096 sample buffer for smooth PCM streaming
+      // Visualizer loop via requestAnimationFrame
+      const freqData = new Uint8Array(analyser.frequencyBinCount)
+      const updateLevel = () => {
+        if (!isRecordingRef.current) return
+        analyser.getByteFrequencyData(freqData)
+        let sum = 0
+        for (let i = 0; i < freqData.length; i++) sum += freqData[i]
+        const avg = sum / freqData.length
+        const normalized = Math.min(100, Math.round((avg / 128) * 100))
+        setAudioLevel(normalized)
+        animFrameRef.current = requestAnimationFrame(updateLevel)
+      }
+
+      // ScriptProcessor for PCM audio capture
       const processor = audioCtx.createScriptProcessor(4096, 1, 1)
       processorNodeRef.current = processor
 
-      const freqData = new Uint8Array(analyser.frequencyBinCount)
-
       processor.onaudioprocess = e => {
-        if (!isRecording && micStatus !== 'recording') return
+        if (!isRecordingRef.current) return
         const inputData = e.inputBuffer.getChannelData(0)
         
         // Clone input samples for WAV encoding
         const copy = new Float32Array(inputData.length)
         copy.set(inputData)
         pcmSamplesRef.current.push(copy)
-
-        // Calculate real-time voice decibel level
-        if (analyserRef.current) {
-          analyserRef.current.getByteFrequencyData(freqData)
-          let sum = 0
-          for (let i = 0; i < freqData.length; i++) sum += freqData[i]
-          const avg = sum / freqData.length
-          const normalized = Math.min(100, Math.round((avg / 128) * 100))
-          setAudioLevel(normalized)
-        }
       }
 
       sourceNode.connect(analyser)
       analyser.connect(processor)
       processor.connect(audioCtx.destination)
 
+      isRecordingRef.current = true
       setIsRecording(true)
       setMicStatus('recording')
       setRecordSeconds(0)
+
+      updateLevel()
+
       timerIntervalRef.current = setInterval(() => {
         setRecordSeconds(s => s + 1)
       }, 1000)
     } catch (err) {
       console.error('Microphone error:', err)
+      isRecordingRef.current = false
       setMicStatus('idle')
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setError('Microphone permission was denied. Please click the 🔒 / 🎙️ icon in your address bar and allow access.')
@@ -152,7 +167,8 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
   }
 
   function stopRecording() {
-    if (!isRecording) return
+    isRecordingRef.current = false
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
     setIsRecording(false)
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
     setAudioLevel(0)
