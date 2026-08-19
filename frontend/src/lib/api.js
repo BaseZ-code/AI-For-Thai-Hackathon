@@ -16,6 +16,14 @@ export const API_TARGET =
   typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : 'http://team8.105app.site'
 
 /**
+ * Helper to ensure source matches backend Literal["line", "facebook", "other"]
+ */
+function sanitizeSource(source) {
+  if (['line', 'facebook'].includes(source)) return source
+  return 'other'
+}
+
+/**
  * POST /v1/chat/analyze (with fallback to /v1/extractions for backward compatibility)
  * Returns { data, meta } on success.
  * Throws { status, title, detail } on API error (RFC 7807 shape).
@@ -24,9 +32,18 @@ export const API_TARGET =
  * @param {string} source    - 'line' | 'facebook' | 'call_center' | 'other'
  */
 export async function extractFromMessages(messages, source = 'line') {
+  // Ensure at least 1 non-empty message to satisfy min_length=1
+  const validMessages = (messages || [])
+    .filter(m => m && typeof m.content === 'string' && m.content.trim().length > 0)
+    .map(m => ({
+      role: ['customer', 'agent', 'system'].includes(m.role) ? m.role : 'customer',
+      content: m.content.trim(),
+      ...(m.timestamp ? { timestamp: m.timestamp } : {}),
+    }))
+
   const payload = JSON.stringify({
-    source,
-    messages,
+    source: sanitizeSource(source),
+    messages: validMessages.length > 0 ? validMessages : [{ role: 'customer', content: 'สอบถามข้อมูลครับ' }],
     extract: ['intent', 'sentiment', 'entities'],
   })
   const headers = { 'Content-Type': 'application/json' }
@@ -50,7 +67,11 @@ export async function extractFromMessages(messages, source = 'line') {
     let err = { status: res.status, title: 'Request failed', detail: res.statusText }
     try {
       const j = await res.json()
-      err = { status: res.status, title: j.title || err.title, detail: j.detail || err.detail }
+      // Extract detailed validation messages if present
+      const detailStr = Array.isArray(j.detail) 
+        ? j.detail.map(d => `${d.loc?.join('.')}: ${d.msg}`).join(', ')
+        : (j.detail || err.detail)
+      err = { status: res.status, title: j.title || err.title, detail: detailStr }
     } catch (_) {}
     throw err
   }
@@ -65,7 +86,7 @@ export async function extractFromMessages(messages, source = 'line') {
 export async function extractFromAudio(audioFile, source = 'call_center') {
   const formData = new FormData()
   formData.append('file', audioFile)
-  formData.append('source', source)
+  formData.append('source', sanitizeSource(source))
   formData.append('extract', JSON.stringify(['intent', 'sentiment', 'entities']))
 
   const res = await fetch(`${BASE}/audio/analyze`, {
@@ -77,7 +98,10 @@ export async function extractFromAudio(audioFile, source = 'call_center') {
     let err = { status: res.status, title: 'Audio Analysis failed', detail: res.statusText }
     try {
       const j = await res.json()
-      err = { status: res.status, title: j.title || err.title, detail: j.detail || err.detail }
+      const detailStr = Array.isArray(j.detail)
+        ? j.detail.map(d => `${d.loc?.join('.')}: ${d.msg}`).join(', ')
+        : (j.detail || err.detail)
+      err = { status: res.status, title: j.title || err.title, detail: detailStr }
     } catch (_) {}
     throw err
   }

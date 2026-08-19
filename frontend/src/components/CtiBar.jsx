@@ -80,14 +80,14 @@ export default function CtiBar({
       {/* Backend status badge */}
       <BackendBadge status={backendStatus} />
 
-      {/* Load transcript button — disabled in Live Mode or when ended */}
+      {/* Load Voice / Transcript button — disabled in Live Mode or when ended */}
       <CtiBtn
         onClick={onOpenUploader}
         disabled={ended || isLiveMode}
-        title={isLiveMode ? "Disabled in Live Mode (type directly in the chat log)" : "Open transcript loader"}
+        title={isLiveMode ? "Disabled in Live Mode (type directly in the chat log)" : "Open Voice Recording & Audio / Transcript Ingestion"}
         activeHighlight={!isLiveMode && !ended}
       >
-        📂 Load Transcript
+        🎙️ Voice & Audio Ingestion
       </CtiBtn>
 
       {/* Call controls */}

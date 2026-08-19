@@ -1,12 +1,12 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { parseUploadInput } from '../lib/mapResponse'
 import { DEFAULT_TRANSCRIPT } from '../lib/mockPayload'
 import { extractFromAudio } from '../lib/api'
 
 const SOURCES = ['call_center', 'line', 'facebook', 'other']
 const TABS = [
-  { id: 'audio',  label: '🎙️ Audio Recording', desc: 'Upload .wav/.mp3/.m4a for ASR' },
-  { id: 'paste',  label: '📋 Paste / JSON',      desc: 'JSON or raw dialogue text' },
+  { id: 'audio',  label: '🎙️ Voice & Audio',   desc: 'Live Mic Recording or .wav/.mp3 File' },
+  { id: 'paste',  label: '📋 Text / JSON',      desc: 'Paste transcript or JSON dialogue' },
 ]
 
 export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, history = [] }) {
@@ -18,11 +18,67 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
 
-  // Audio Upload Tab state
+  // Audio Upload / Live Recording state
   const [audioFile, setAudioFile] = useState(null)
   const [audioUploading, setAudioUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef(null)
+
+  // In-Browser Live Mic Recording State
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordSeconds, setRecordSeconds] = useState(0)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
+  const timerIntervalRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
+      if (mediaRecorderRef.current && isRecording) {
+        mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
+      }
+    }
+  }, [isRecording])
+
+  async function startRecording() {
+    setError(null)
+    setAudioFile(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioChunksRef.current = []
+      
+      const mediaRecorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = mediaRecorder
+
+      mediaRecorder.ondataavailable = e => {
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
+        const file = new File([audioBlob], `mic-recording-${Date.now()}.wav`, { type: 'audio/wav' })
+        setAudioFile(file)
+        stream.getTracks().forEach(t => t.stop())
+      }
+
+      mediaRecorder.start()
+      setIsRecording(true)
+      setRecordSeconds(0)
+      timerIntervalRef.current = setInterval(() => {
+        setRecordSeconds(s => s + 1)
+      }, 1000)
+    } catch (err) {
+      setError('Microphone access denied or not supported in this browser. Please use file upload.')
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
+    }
+  }
 
   function handlePasteLoad() {
     setError(null)
@@ -78,6 +134,8 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
     setError(null)
   }
 
+  const fmtTime = s => `${String(Math.floor(s / 60)).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}`
+
   return (
     <div
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
@@ -89,7 +147,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
       }}
     >
       <div style={{
-        background: 'white', borderRadius: 12, width: 'min(740px, 94vw)',
+        background: 'white', borderRadius: 12, width: 'min(760px, 94vw)',
         boxShadow: '0 24px 64px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column',
         overflow: 'hidden', animation: 'slide-down 0.2s ease', maxHeight: '90vh',
       }}>
@@ -100,9 +158,9 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
           padding: '14px 20px', borderBottom: '1px solid var(--zd-border)', background: '#fafafa',
         }}>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>📂 Load Audio or Transcript Data</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>🎙️ Voice Audio & Transcript Ingestion</div>
             <div style={{ fontSize: 11, color: 'var(--zd-text-muted)', marginTop: 2 }}>
-              Input Thai call audio for speech recognition (ASR) or paste chat logs
+              Record live speech via mic, upload audio files (.wav/.mp3), or paste dialogue
             </div>
           </div>
           <button
@@ -120,7 +178,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
               key={tab.id}
               onClick={() => { setActiveTab(tab.id); setError(null); }}
               style={{
-                flex: 1, padding: '10px 0', textAlign: 'center',
+                flex: 1, padding: '11px 0', textAlign: 'center',
                 border: 'none', borderBottom: `2px solid ${activeTab === tab.id ? 'var(--ct-orange)' : 'transparent'}`,
                 background: 'transparent', cursor: 'pointer', transition: 'all 0.15s',
               }}
@@ -205,9 +263,68 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
             )}
           </div>
 
-          {/* ── AUDIO TAB ── */}
+          {/* ── VOICE & AUDIO TAB ── */}
           {activeTab === 'audio' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              
+              {/* Option 1: In-Browser Microphone Recorder */}
+              <div style={{
+                background: isRecording ? '#fef2f2' : '#f8fafc',
+                border: `1px solid ${isRecording ? '#fecaca' : '#e2e8f0'}`,
+                borderRadius: 10, padding: '16px 20px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                transition: 'all 0.2s',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: isRecording ? '#ef4444' : '#3b82f6',
+                    color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 16,
+                    animation: isRecording ? 'pulse-red 1.2s infinite' : 'none',
+                  }}>
+                    {isRecording ? '⏺' : '🎙️'}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
+                      {isRecording ? 'Live Microphone Recording in Progress…' : 'Record Thai Voice Call Directly via Mic'}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                      {isRecording ? `Timer: ${fmtTime(recordSeconds)} · Speak naturally in Thai` : 'Click Start to simulate a live customer call session'}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  {!isRecording ? (
+                    <button
+                      onClick={startRecording}
+                      style={{
+                        padding: '7px 16px', borderRadius: 8, border: 'none',
+                        background: 'linear-gradient(135deg,#3b82f6,#1d4ed8)',
+                        color: 'white', fontSize: 12, fontWeight: 700,
+                        cursor: 'pointer', boxShadow: '0 2px 6px rgba(59,130,246,0.3)',
+                      }}
+                    >
+                      🎙️ Start Recording
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopRecording}
+                      style={{
+                        padding: '7px 16px', borderRadius: 8, border: 'none',
+                        background: '#ef4444',
+                        color: 'white', fontSize: 12, fontWeight: 700,
+                        cursor: 'pointer', boxShadow: '0 2px 6px rgba(239,68,68,0.35)',
+                      }}
+                    >
+                      ⏹️ Stop Recording ({fmtTime(recordSeconds)})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Option 2: Drag & Drop File Upload */}
               <div
                 onDragOver={e => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
@@ -219,12 +336,9 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
                 onClick={() => fileInputRef.current?.click()}
                 style={{
                   border: `2px dashed ${dragOver ? 'var(--ct-orange)' : (audioFile ? '#22c55e' : '#cbd5e1')}`,
-                  borderRadius: 10,
-                  padding: '32px 20px',
-                  textAlign: 'center',
-                  background: dragOver ? 'var(--ct-lt)' : (audioFile ? '#f0fdf4' : '#f8fafc'),
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
+                  borderRadius: 10, padding: '24px 20px', textAlign: 'center',
+                  background: dragOver ? 'var(--ct-lt)' : (audioFile ? '#f0fdf4' : '#fafafa'),
+                  cursor: 'pointer', transition: 'all 0.15s',
                 }}
               >
                 <input
@@ -234,19 +348,15 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
                   onChange={e => e.target.files?.[0] && handleAudioFileSelected(e.target.files[0])}
                   style={{ display: 'none' }}
                 />
-                <div style={{ fontSize: 32, marginBottom: 8 }}>{audioFile ? '🎵' : '🎙️'}</div>
+                <div style={{ fontSize: 28, marginBottom: 6 }}>{audioFile ? '🎵' : '📁'}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: audioFile ? '#16a34a' : '#1e293b' }}>
-                  {audioFile ? audioFile.name : 'Click to select or drag & drop audio recording'}
+                  {audioFile ? `Ready: ${audioFile.name}` : 'Or click to select / drop pre-recorded audio file'}
                 </div>
-                <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
                   {audioFile
-                    ? `Ready for transcription (${(audioFile.size / (1024 * 1024)).toFixed(2)} MB)`
+                    ? `File size: ${(audioFile.size / (1024 * 1024)).toFixed(2)} MB · Click button below to analyze`
                     : 'Supports .mp3, .wav, .m4a, .flac (up to 10 MB)'}
                 </div>
-              </div>
-
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px', fontSize: 11, color: '#475569', lineHeight: 1.5 }}>
-                💡 <strong>Speech-to-Text Pipeline:</strong> Audio is uploaded to <code style={{ background: '#e2e8f0', padding: '1px 4px', borderRadius: 3 }}>/v1/audio/analyze</code>, transcribed via ASR into Thai turns, and passed directly to the ChaiToke LLM triage engine.
               </div>
 
               {error && (
@@ -257,11 +367,11 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
 
               {success && (
                 <div style={{ fontSize: 12, color: '#16a34a', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, padding: '8px 12px' }}>
-                  ✅ Audio transcribed & analyzed successfully!
+                  ✅ Voice transcribed via Google Cloud ASR & analyzed by ChaiToke!
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
                 <button
                   onClick={onClose}
                   style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--zd-border)', background: 'white', color: '#374151', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
@@ -270,22 +380,22 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
                 </button>
                 <button
                   onClick={handleUploadAudioAndAnalyze}
-                  disabled={!audioFile || audioUploading}
+                  disabled={!audioFile || audioUploading || isRecording}
                   style={{
                     padding: '8px 20px', borderRadius: 8, border: 'none',
-                    background: (!audioFile || audioUploading) ? '#cbd5e1' : 'linear-gradient(135deg,var(--ct-orange),var(--ct-dark))',
+                    background: (!audioFile || audioUploading || isRecording) ? '#cbd5e1' : 'linear-gradient(135deg,var(--ct-orange),var(--ct-dark))',
                     color: 'white', fontSize: 12, fontWeight: 700,
-                    boxShadow: (!audioFile || audioUploading) ? 'none' : '0 2px 8px rgba(255,107,0,0.3)',
-                    cursor: (!audioFile || audioUploading) ? 'not-allowed' : 'pointer',
+                    boxShadow: (!audioFile || audioUploading || isRecording) ? 'none' : '0 2px 8px rgba(255,107,0,0.3)',
+                    cursor: (!audioFile || audioUploading || isRecording) ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {audioUploading ? '⏳ Transcribing Audio (ASR)...' : 'Transcribe & Analyze Audio →'}
+                  {audioUploading ? '⏳ Transcribing Voice (ASR + LLM)...' : 'Transcribe & Analyze Voice →'}
                 </button>
               </div>
             </div>
           )}
 
-          {/* ── PASTE TAB ── */}
+          {/* ── PASTE / TEXT TAB ── */}
           {activeTab === 'paste' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <textarea
