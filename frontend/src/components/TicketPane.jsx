@@ -30,6 +30,7 @@ const ROLE_STYLE = {
 export default function TicketPane({
   callState,
   callDuration,
+  chaiState,
   priorityColour,
   transcript,
   transcriptMode, // 'live' | 'upload'
@@ -42,6 +43,7 @@ export default function TicketPane({
 }) {
   const ended = callState === 'ended'
   const high = priorityColour === 'red'
+  const isLoading = chaiState === 'loading'
   const convRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -57,6 +59,13 @@ export default function TicketPane({
       setComposerText(customerFields.blufNote)
     }
   }, [pushed, customerFields?.blufNote])
+
+  // Clear composer text when starting a new loading session
+  useEffect(() => {
+    if (isLoading) {
+      setComposerText('')
+    }
+  }, [isLoading])
 
   // Decide which messages to render: in live mode use liveMessages, otherwise transcript.messages
   const displayMessages = transcriptMode === 'live' 
@@ -121,16 +130,28 @@ export default function TicketPane({
       <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--zd-border)', flexShrink: 0, background: '#ffffff' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <div style={{ fontSize: 11, color: 'var(--zd-text-muted)' }}>Ticket #4471 · HomePro 24/7 Call Care</div>
-          {transcriptMode === 'live' && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              background: '#eff6ff', border: '1px solid #bfdbfe',
-              borderRadius: 99, padding: '2px 8px', fontSize: 10, fontWeight: 700, color: '#1d4ed8',
-            }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', display: 'inline-block' }} />
-              Live Interactive Chat
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {isLoading && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                background: '#fff7ed', border: '1px solid #fed7aa',
+                borderRadius: 99, padding: '2px 8px', fontSize: 10, fontWeight: 700, color: 'var(--ct-orange)',
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--ct-orange)', animation: 'pulse 0.8s infinite' }} />
+                AI Triaging…
+              </div>
+            )}
+            {transcriptMode === 'live' && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: '#eff6ff', border: '1px solid #bfdbfe',
+                borderRadius: 99, padding: '2px 8px', fontSize: 10, fontWeight: 700, color: '#1d4ed8',
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', display: 'inline-block' }} />
+                Live Interactive Chat
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 8 }}>
           Demo Ticket
@@ -171,8 +192,33 @@ export default function TicketPane({
       >
         <SystemMsg icon="📞">Inbound call connected — HomePro 24/7 Call Center · {new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</SystemMsg>
 
+        {/* Live AI Processing Banner during Triaging */}
+        {isLoading && (
+          <div style={{
+            background: 'linear-gradient(135deg, #fff7ed, #eff6ff)',
+            border: '1px solid #fed7aa', borderRadius: 8, padding: '12px 14px',
+            display: 'flex', alignItems: 'center', gap: 10,
+            boxShadow: '0 2px 8px rgba(255,107,0,0.08)',
+            animation: 'fade-in 0.3s ease',
+          }}>
+            <div style={{
+              width: 20, height: 20, borderRadius: '50%',
+              border: '2.5px solid #fed7aa', borderTopColor: 'var(--ct-orange)',
+              animation: 'spin 0.75s linear infinite', flexShrink: 0,
+            }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ct-dark)' }}>
+                Reconstructing Dialogue & Parsing Speaker Turns…
+              </div>
+              <div style={{ fontSize: 10.5, color: '#b45309', marginTop: 1 }}>
+                กำลังจัดโครงสร้างบทสนทนา [ลูกค้า / เจ้าหน้าที่] ด้วยโมเดล ThaiLLM
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* In Upload Mode (Active): show default placeholder */}
-        {transcriptMode === 'upload' && !ended && (
+        {transcriptMode === 'upload' && !ended && !isLoading && (
           <div style={{ display: 'flex', gap: 10 }}>
             <Avatar initials="AG" gradient="linear-gradient(135deg,#f59e0b,#d97706)" size={28} />
             <div>
@@ -186,6 +232,20 @@ export default function TicketPane({
               }}>
                 สวัสดีครับ ศูนย์บริการลูกค้าโฮมโปร 24 ชั่วโมง ยินดีให้บริการครับ วันนี้มีอะไรให้ผมดูแลครับ
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Shimmer skeleton bubbles during Loading if no messages yet */}
+        {isLoading && displayMessages.length === 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, opacity: 0.7 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#e2e8f0' }} />
+              <div style={{ width: '60%', height: 38, borderRadius: 8, background: '#ffffff', border: '1px solid #e2e8f0', animation: 'pulse 1.2s infinite' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-end', width: '70%', justifyContent: 'flex-end' }}>
+              <div style={{ width: '85%', height: 48, borderRadius: 8, background: '#eef2ff', border: '1px solid #c7d2fe', animation: 'pulse 1.2s infinite' }} />
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#c7d2fe' }} />
             </div>
           </div>
         )}

@@ -350,6 +350,7 @@ export default function App() {
           <TicketPane
             callState={callState}
             callDuration={callDuration}
+            chaiState={chaiState}
             priorityColour={customerFields?.priorityColour || mapped?.priorityColour}
             transcript={transcript}
             transcriptMode={transcriptMode}
