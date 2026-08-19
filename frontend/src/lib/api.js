@@ -16,26 +16,37 @@ export const API_TARGET =
   typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : 'http://team8.105app.site'
 
 /**
- * POST /v1/extractions
+ * POST /v1/chat/analyze (with fallback to /v1/extractions for backward compatibility)
  * Returns { data, meta } on success.
  * Throws { status, title, detail } on API error (RFC 7807 shape).
  *
  * @param {Array}  messages  - Chat messages array [{ role, content, timestamp? }]
- * @param {string} source    - 'line' | 'facebook' | 'other'
+ * @param {string} source    - 'line' | 'facebook' | 'call_center' | 'other'
  */
 export async function extractFromMessages(messages, source = 'line') {
-  const res = await fetch(`${BASE}/extractions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      source,
-      messages,
-      extract: ['intent', 'sentiment', 'entities'],
-    }),
+  const payload = JSON.stringify({
+    source,
+    messages,
+    extract: ['intent', 'sentiment', 'entities'],
   })
+  const headers = { 'Content-Type': 'application/json' }
+
+  // Try /v1/chat/analyze first, then /v1/extractions
+  let res = await fetch(`${BASE}/chat/analyze`, {
+    method: 'POST',
+    headers,
+    body: payload,
+  }).catch(() => null)
+
+  if (!res || res.status === 404) {
+    res = await fetch(`${BASE}/extractions`, {
+      method: 'POST',
+      headers,
+      body: payload,
+    })
+  }
 
   if (!res.ok) {
-    // Parse RFC 7807 error shape from backend (see TECH_STACK.md → Error Handling)
     let err = { status: res.status, title: 'Request failed', detail: res.statusText }
     try {
       const j = await res.json()
@@ -45,6 +56,33 @@ export async function extractFromMessages(messages, source = 'line') {
   }
 
   return res.json() // { data, meta }
+}
+
+/**
+ * POST /v1/audio/analyze
+ * Uploads an audio file (.mp3, .wav, .m4a, .flac) for ASR transcription + LLM extraction.
+ */
+export async function extractFromAudio(audioFile, source = 'call_center') {
+  const formData = new FormData()
+  formData.append('file', audioFile)
+  formData.append('source', source)
+  formData.append('extract', JSON.stringify(['intent', 'sentiment', 'entities']))
+
+  const res = await fetch(`${BASE}/audio/analyze`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!res.ok) {
+    let err = { status: res.status, title: 'Audio Analysis failed', detail: res.statusText }
+    try {
+      const j = await res.json()
+      err = { status: res.status, title: j.title || err.title, detail: j.detail || err.detail }
+    } catch (_) {}
+    throw err
+  }
+
+  return res.json()
 }
 
 /**
