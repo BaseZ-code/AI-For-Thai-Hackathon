@@ -51,6 +51,7 @@ export default function App() {
   // ── ChaiToke sidebar state ───────────────────────────────────
   const [chaiState, setChaiState] = useState('waiting')
   const [mapped, setMapped] = useState(null)
+  const [rawResult, setRawResult] = useState(null)
   const [isOffline, setIsOffline] = useState(false)
   const [apiError, setApiError] = useState(null)
 
@@ -109,6 +110,7 @@ export default function App() {
         result = MOCK_RESPONSE
         setIsOffline(true)
       }
+      setRawResult(result)
       setMapped(mapResponse(result))
       setChaiState('results')
     } catch (err) {
@@ -116,6 +118,7 @@ export default function App() {
       await new Promise(r => setTimeout(r, 800))
       setIsOffline(true)
       setApiError(`API error ${err.status || 500}: ${err.title || err.message || 'Offline fallback'}`)
+      setRawResult(MOCK_RESPONSE)
       setMapped(mapResponse(MOCK_RESPONSE))
       setChaiState('results')
     }
@@ -165,6 +168,7 @@ export default function App() {
     setCallState('active')
     setChaiState('waiting')
     setMapped(null)
+    setRawResult(null)
     setPushed(false)
     setCustomerFields(null)
     setApiError(null)
@@ -327,6 +331,7 @@ export default function App() {
             onTabChange={setActiveTab}
             chaiState={chaiState}
             mapped={mapped}
+            rawResult={rawResult}
             isOffline={isOffline}
             onPush={handlePush}
             pushed={pushed}

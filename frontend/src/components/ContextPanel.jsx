@@ -3,7 +3,7 @@ import ChaiTokeCard from './ChaiTokeCard'
 
 export default function ContextPanel({
   activeTab, onTabChange,
-  chaiState, mapped, isOffline,
+  chaiState, mapped, rawResult, isOffline,
   onPush, pushed,
   customerFields,
   pushCount,
@@ -39,6 +39,7 @@ export default function ContextPanel({
             <ChaiTokeCard
               chaiState={chaiState}
               mapped={mapped}
+              rawResult={rawResult}
               isOffline={isOffline}
               onPush={onPush}
               pushed={pushed}

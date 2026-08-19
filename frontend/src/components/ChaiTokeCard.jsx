@@ -8,9 +8,12 @@ const SENTIMENT_OPTIONS = [
   { value: 'mixed',    emoji: '😕', label: 'Mixed' },
 ]
 
-export default function ChaiTokeCard({ chaiState, mapped, isOffline, onPush, pushed }) {
+export default function ChaiTokeCard({ chaiState, mapped, rawResult, isOffline, onPush, pushed }) {
   const [collapsed, setCollapsed] = useState(false)
   const [editMode,  setEditMode]  = useState(false)
+  const [showJsonModal, setShowJsonModal] = useState(false)
+  const [downloaded, setDownloaded] = useState(false)
+
   // Editable draft — seeded from mapped when results arrive
   const [draft, setDraft] = useState(null)
 
@@ -27,14 +30,27 @@ export default function ChaiTokeCard({ chaiState, mapped, isOffline, onPush, pus
                       : mapped.sentimentLabel === 'Positive'  ? 'positive'
                       : mapped.sentimentLabel === 'Mixed'     ? 'mixed'
                       : 'neutral',
-        notes: '', // free-text notes the agent adds before pushing
+        notes: '',
       })
     }
   }, [mapped])
 
   function handlePush() {
-    // Pass the (possibly edited) draft back up to App
     onPush(draft)
+  }
+
+  function handleDownloadJson() {
+    if (!rawResult) return
+    const extractionId = rawResult.data?.extraction_id || 'demo'
+    const blob = new Blob([JSON.stringify(rawResult, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `chaitoke-api-result-${extractionId}-${Date.now()}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    setDownloaded(true)
+    setTimeout(() => setDownloaded(false), 2500)
   }
 
   return (
@@ -85,16 +101,33 @@ export default function ChaiTokeCard({ chaiState, mapped, isOffline, onPush, pus
           {chaiState === 'results' && mapped && draft && (
             <div style={{ display:'flex', flexDirection:'column', animation:'fade-in 0.35s ease' }}>
 
-              {/* Result header */}
+              {/* Result header & Download Action */}
               <div style={{ padding:'10px 14px 8px', borderBottom:'1px solid var(--ct-mid)', display:'flex', alignItems:'center', gap:6 }}>
                 <div style={{ flex:1, fontSize:10, fontWeight:700, color:'var(--ct-dark)', textTransform:'uppercase', letterSpacing:'0.08em' }}>
                   {editMode ? '✏️ Editing' : '✨ Auto-generated'}
                 </div>
                 {!editMode && mapped.confidence != null && (
-                  <span style={{ fontSize:10, color:'#059669', fontWeight:600, background:'#d1fae5', padding:'2px 6px', borderRadius:99 }}>{mapped.confidence}% confidence</span>
+                  <span style={{ fontSize:10, color:'#059669', fontWeight:600, background:'#d1fae5', padding:'2px 6px', borderRadius:99 }}>{mapped.confidence}% conf</span>
                 )}
-                {!editMode && mapped.processingMs > 0 && (
-                  <span style={{ fontSize:10, color:'#6b7280', background:'#f3f4f6', padding:'2px 6px', borderRadius:99 }}>{mapped.processingMs}ms</span>
+                
+                {/* Download Server Result JSON */}
+                {rawResult && (
+                  <button
+                    onClick={handleDownloadJson}
+                    title="Download raw server JSON response"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      fontSize: 10, fontWeight: 700,
+                      padding: '2px 8px', borderRadius: 99,
+                      border: '1px solid #fed7aa',
+                      background: downloaded ? '#f0fdf4' : 'white',
+                      color: downloaded ? '#16a34a' : 'var(--ct-dark)',
+                      cursor: 'pointer', transition: 'all 0.15s',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                    }}
+                  >
+                    {downloaded ? '✓ Saved' : '↓ JSON'}
+                  </button>
                 )}
               </div>
 
@@ -188,11 +221,11 @@ export default function ChaiTokeCard({ chaiState, mapped, isOffline, onPush, pus
                 )}
               </div>
 
-              {/* Push button */}
+              {/* Push button & secondary actions */}
               {!editMode && (
                 <>
                   <button onClick={handlePush} disabled={pushed} style={{
-                    width:'calc(100% - 28px)', margin:'4px 14px 14px',
+                    width:'calc(100% - 28px)', margin:'4px 14px 6px',
                     padding:'10px', borderRadius:8, border:'none',
                     background: pushed ? '#d1d5db' : 'linear-gradient(135deg,var(--ct-orange),var(--ct-dark))',
                     color: pushed ? '#9ca3af' : 'white',
@@ -204,6 +237,23 @@ export default function ChaiTokeCard({ chaiState, mapped, isOffline, onPush, pus
                   }}>
                     {pushed ? '✓ Pushed to ticket' : '⬆ Push to Ticket Fields'}
                   </button>
+
+                  {/* Secondary button: View raw JSON */}
+                  {rawResult && (
+                    <div style={{ display: 'flex', justifyContent: 'center', margin: '0 14px 10px' }}>
+                      <button
+                        onClick={() => setShowJsonModal(true)}
+                        style={{
+                          background: 'transparent', border: 'none',
+                          color: '#b45309', fontSize: 11, fontWeight: 600,
+                          cursor: 'pointer', textDecoration: 'underline',
+                        }}
+                      >
+                        {'{ } View Server JSON Response'}
+                      </button>
+                    </div>
+                  )}
+
                   <div style={{ padding:'8px 14px', borderTop:'1px solid var(--ct-mid)', fontSize:10, color:'#b45309', display:'flex', alignItems:'center', gap:4 }}>
                     🔒 Connected via ChaiToke API · Scopes: Tickets (read/write)
                   </div>
@@ -224,6 +274,74 @@ export default function ChaiTokeCard({ chaiState, mapped, isOffline, onPush, pus
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Raw JSON Modal */}
+      {showJsonModal && rawResult && (
+        <div
+          onClick={() => setShowJsonModal(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 300,
+            background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(3px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'white', borderRadius: 12, width: 'min(680px, 92vw)',
+              maxHeight: '85vh', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.3)', overflow: 'hidden',
+              animation: 'slide-down 0.2s ease',
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 18px', borderBottom: '1px solid var(--zd-border)', background: '#fafafa',
+            }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>⚡ Server API Response JSON</div>
+                <div style={{ fontSize: 10, color: 'var(--zd-text-muted)', marginTop: 2 }}>
+                  Extraction ID: {rawResult.data?.extraction_id || 'N/A'} · Model: {rawResult.meta?.model || 'N/A'}
+                </div>
+              </div>
+              <button
+                onClick={() => setShowJsonModal(false)}
+                style={{ background: 'transparent', border: 'none', fontSize: 18, color: '#9ca3af', cursor: 'pointer', padding: '2px 6px' }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ flex: 1, padding: 14, overflowY: 'auto', background: '#0f172a' }}>
+              <pre style={{
+                margin: 0, color: '#38bdf8', fontSize: 11, fontFamily: 'ui-monospace, monospace', lineHeight: 1.5,
+              }}>
+                {JSON.stringify(rawResult, null, 2)}
+              </pre>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '10px 18px', borderTop: '1px solid var(--zd-border)', background: 'white' }}>
+              <button
+                onClick={() => setShowJsonModal(false)}
+                style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--zd-border)', background: 'white', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
+              >
+                Close
+              </button>
+              <button
+                onClick={handleDownloadJson}
+                style={{
+                  padding: '6px 16px', borderRadius: 6, border: 'none',
+                  background: 'linear-gradient(135deg,var(--ct-orange),var(--ct-dark))',
+                  color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                ↓ Download File
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
