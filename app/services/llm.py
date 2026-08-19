@@ -15,113 +15,151 @@ from app.config import settings
 from app.core.exceptions import LLMTimeoutError, LLMUpstreamError
 from app.schemas.request import ExtractionRequest
 from app.schemas.response import (
+    AfterCallWork,
+    BlufNote,
     CRMFields,
     Entity,
+    EscalationLogic,
     ExtractionData,
     ExtractionResponse,
+    Identity,
     Intent,
+    IssueTriage,
     Meta,
     Sentiment,
 )
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_llm_json(raw_content: str) -> dict[str, Any]:
+    """Parse LLM output as JSON, stripping markdown fences if present."""
+    text = raw_content.strip()
+
+    if not text:
+        logger.info("Raw LLM content: EMPTY STRING")
+        raise ValueError("LLM returned empty content")
+
+    logger.info("Raw LLM content:\n%s", text)
+
+    # Strip <think>...</think> chain-of-thought blocks
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    # Strip ```json ... ``` or ``` ... ``` wrappers
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+        text = text.strip()
+
+    if not text:
+        raise ValueError("LLM returned only a <think> block with no JSON")
+
+    return json.loads(text)
+
 # ---------------------------------------------------------------------------
 # Prompt template
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
-You are a Thai customer service analysis engine. Read the ENTIRE conversation \
-carefully — every message matters. Return ONLY a valid JSON object, no \
-markdown fences, no explanation.
+You are an Enterprise Thai Customer Service AI Triage Engine specialized in 24/7 Call Center operations for HomePro Furniture & Home Solutions.
+Read the ENTIRE conversation transcript carefully — multi-turn verbal context, customer emotions, confirmations, and implicit promises all matter.
+Return ONLY a valid JSON object matching the schema below. Do NOT wrap in markdown fences (` ```json `), and provide NO conversational text outside the JSON.
 
-## Output Schema
+## Output JSON Schema
 
 {
-  "intent": {"primary": "<intent_label>", "confidence": <0.0-1.0>},
-  "sentiment": {"overall": "<positive|negative|neutral|mixed>", "score": <-1.0 to 1.0>},
+  "identity": {
+    "customer_phone": "<10-digit numeric phone number or null>",
+    "order_invoice_no": "<invoice / receipt / order reference or null>",
+    "product_sku_model": "<furniture type or model e.g. Wardrobe, Sofa, Dining Table, Bed, or null>"
+  },
+  "issue_triage": {
+    "furniture_damage_type": "<Structural_Failure | Cosmetic_Damage | Missing_Assembly_Hardware | null>",
+    "photo_evidence_received": <true | false>,
+    "incident_description": "<concise summary in Thai of how and when the issue occurred>"
+  },
+  "escalation_logic": {
+    "escalation_required": <true | false>,
+    "escalation_target": "<Home_Service_Technician | Logistics_Delivery_Team | Furniture_Vendor_Support | null>",
+    "escalation_reason": "<brief justification for routing target>"
+  },
+  "after_call_work": {
+    "call_disposition": "Broken_Furniture_Intake",
+    "ticket_status": "<Pending_Inspection | Replacement_Dispatched | Awaiting_Photos>",
+    "action_deadline": "<target date/time window e.g. 'Within 48 hours', 'ภายใน 2 วัน', or ISO date if mentioned>",
+    "bluf_note": {
+      "bottom_line": "<1-sentence executive summary stating resolution/status and primary issue>",
+      "context": "<concise key facts: damage details, item type, and photo evidence status>",
+      "next_steps": "<action taken, assigned escalation team, and target SLA deadline>",
+      "formatted_text": "<ready-to-paste 3-line BLUF note formatted exactly as: [BLUF]: <bottom_line>\\n• Context: <context>\\n• Next Steps: <next_steps>>"
+    }
+  },
+  "intent": {
+    "primary": "<complaint | refund_request | shipping_inquiry | product_inquiry | general_inquiry>",
+    "confidence": <0.0 to 1.0>
+  },
+  "sentiment": {
+    "overall": "<positive | negative | neutral | mixed>",
+    "score": <-1.0 to 1.0>
+  },
   "entities": [
-    {"type": "<entity_type>", "value": "<extracted_value>", "span": "<original_text>"}
+    {"type": "<phone_number | order_id | person_name | product_name | date | address>", "value": "<extracted_value>", "span": "<original_text>"}
   ],
   "crm_fields": {
     "customer_name": "<name or null>",
-    "phone": "<phone or null>",
+    "phone": "<customer_phone or null>",
     "email": "<email or null>",
-    "order_id": "<order_id or null>",
-    "issue_category": "<category>",
-    "priority": "<low|normal|high|urgent>"
+    "order_id": "<order_invoice_no or null>",
+    "issue_category": "<furniture_damage_type or intent>",
+    "priority": "<low | normal | high | urgent>"
   }
 }
 
-## Intent Labels
+## Field Extraction & Business Validation Rules
 
-Use one of: greeting, order_inquiry, shipping_inquiry, product_inquiry, \
-complaint, refund_request, order_cancellation, payment_issue, \
-account_inquiry, general_inquiry.
+### 1. Identity Verification
+- `customer_phone`: 9–10 numeric digits starting with 0. Primary key for HomeCard member database lookup.
+- `order_invoice_no`: Alphanumeric purchase reference. Preceded by keywords: เลขที่ใบเสร็จ, ใบกำกับ, ออเดอร์, order, #, รหัสคำสั่งซื้อ.
+- `product_sku_model`: Extract specific furniture name/model (e.g., ตู้เสื้อผ้า 3 บาน, โซฟาปรับนอน, โต๊ะอาหารไม้ยางพารา).
 
-## Entity Classification Rules
+### 2. Issue Triage Rules
+- `furniture_damage_type` MUST be classified strictly into one of:
+  * `Structural_Failure`: Broken legs, snapped frames, cracked wood/glass, collapsed panels, unusable mechanical parts.
+  * `Cosmetic_Damage`: Scratches (รอยขูดขีด), fabric tears (ผ้าขาด), minor paint chips/dents, cosmetic flaws that don't prevent use.
+  * `Missing_Assembly_Hardware`: Missing screws, bolts, hinges, assembly manual, or incomplete parts pack.
+- `photo_evidence_received`:
+  * Set to `true` ONLY if customer explicitly states they sent pictures or videos via HomePro LINE Official Account (LINE OA) or chat.
+  * Set to `false` if photos are still required or customer has not yet sent them.
+- `incident_description`: Summarize clearly in Thai when and how damage happened.
 
-Each value MUST be assigned exactly ONE entity type. Never duplicate a value \
-under multiple types.
+### 3. Escalation & Routing Logic
+- `escalation_required`:
+  * `false`: If the damage is covered by standard 14-day swap policy and customer already provided photo evidence for an automatic 1-to-1 replacement.
+  * `true`: If the issue requires on-site inspection, technician repair, delivery investigation, or third-party manufacturer warranty review.
+- `escalation_target` (Required if escalation_required is true):
+  * `Home_Service_Technician`: When on-site repair, hardware fixing, or assembly assistance is needed.
+  * `Logistics_Delivery_Team`: When item was damaged in transit, box was crushed, or delivery replacement swap is scheduled.
+  * `Furniture_Vendor_Support`: When manufacturer defect is detected or special parts must be ordered from the external factory/brand.
 
-| Entity Type    | Format & Context Cues |
-|----------------|----------------------|
-| phone_number   | Starts with 0, has 9-10 digits. May include dashes/spaces (081-234-5678). Cues: เบอร์, โทร, ติดต่อ, โทรศัพท์. May also appear WITHOUT a label — a bare 10-digit number starting with 0 is a phone. |
-| order_id       | Reference/member/order IDs. Preceded by: order, #, ออเดอร์, รหัส, หมายเลข, เลขที่, คำสั่งซื้อ. May have letter prefixes (TH, FB). Does NOT start with 0. |
-| person_name    | Thai or English names. Cues: ชื่อ, คุณ, นาย, นาง, นางสาว. Names can also appear WITHOUT an explicit prefix — see Conversational Context rules below. |
-| email          | Standard email format (user@domain.tld). |
-| product_name   | Products, services, subscription plans mentioned. |
-| date           | Dates in any format (dd/mm/yyyy, วันที่, etc.). |
-| address        | Physical addresses, postal codes. |
-| company_name   | Business or organisation names. |
+### 4. After-Call Work (ACW) & BLUF Free-Note Standard
+- `call_disposition`: Tag system record strictly as `"Broken_Furniture_Intake"`.
+- `ticket_status`:
+  * `"Awaiting_Photos"`: If `photo_evidence_received` is `false`.
+  * `"Replacement_Dispatched"`: If `escalation_required` is `false` (eligible for direct 1-to-1 swap).
+  * `"Pending_Inspection"`: If `escalation_required` is `true` (waiting for technician or team review).
+- `action_deadline`: Standard SLA is within 24–48 hours unless a specific appointment date was agreed upon during the call.
+- `bluf_note`: Generate a high-density, professional Bottom-Line-Up-Front note for Tier-2 handoff.
 
 ## Conversational Context Awareness (CRITICAL)
 
-Do NOT analyse messages in isolation. Read the full conversation flow:
-
-1. **Agent-Ask → Customer-Answer pattern**: When an agent asks for specific \
-information (name, phone, order ID, etc.) and the customer's next message \
-contains that information — even without an explicit label — classify it \
-based on what was asked.
-   - Agent: "ขอทราบชื่อ" → Customer: "สมศรี วิชัย" → person_name
-   - Agent: "ขอเบอร์โทร" → Customer: "0812345678" → phone_number
-   - Agent: "ขอเลขออเดอร์" → Customer: "TH12345" → order_id
-
-2. **Confirmation/Denial patterns**: When an agent restates information and \
-the customer confirms (ใช่, ครับ, ค่ะ, ถูกต้อง, correct) or denies \
-(ไม่ใช่, ไม่ถูก, ผิด), use that to validate or reject the entity.
-   - Agent: "คุณสมศรี ใช่มั้ยคะ" → Customer: "ใช่ค่ะ" → confirms person_name "สมศรี"
-   - Agent: "ทาจ บอร์ธวิค คือชื่อใช่มั้ยครับ" → Customer: "ใช่ครับ" → confirms person_name "ทาจ บอร์ธวิค"
-
-3. **Mixed data in one message**: A customer may send multiple pieces of info \
-in a single message (e.g. "สมศรี 0812345678"). Separate them by format:
-   - Thai/English words without digits → likely person_name
-   - 0 + 9 digits → phone_number
-   - Digits with a reference prefix → order_id
-
-4. **Implicit info from agent messages**: Agents may reveal entity values \
-when they restate or confirm customer data. Include these if the customer \
-has confirmed them.
-
-## Disambiguation Priority
-
-When a value could match multiple entity types:
-1. 0 + 9-10 digits (with optional dashes/spaces) → always phone_number
-2. Preceded by a reference keyword (รหัส, order, #, หมายเลข) → order_id
-3. Non-digit text adjacent to a phone number in a response to "ขอข้อมูล" → person_name
-4. When ambiguous, prefer the type that matches the agent's preceding question
-
-## Priority Escalation
-
-- complaint OR negative sentiment → "high"
-- refund_request OR order_cancellation → "normal" (unless also negative → "high")
-- All other intents → "normal"
+Do NOT analyze turns in isolation. Interpret the full conversational flow:
+1. **Agent-Ask → Customer-Answer**: When agent asks for info and customer answers, assign based on what was asked.
+2. **Confirmation Validation**: When agent restates info and customer confirms (ใช่, ครับ, ค่ะ), accept it.
+3. **Implicit Photo Confirmation**: If agent acknowledges receiving photos, set `photo_evidence_received` to `true`.
+4. **Urgency & Priority**: Negative sentiment or structural safety hazards → `"high"` or `"urgent"`.
 
 ## Language Handling
-
-Handle Thai, Tinglish (Thai-English mixing), romanised Thai names, deep \
-social media slang (555, จ้า, อ่ะ, etc.), common abbreviations (นน=น้ำหนัก, \
-ส่ง=จัดส่ง), and zero-width joiners/spaces in Thai text naturally.\
+Process natural spoken Thai, Tinglish, colloquial terms (เช่น ขาเก้าอี้โยก, น็อตหลวม, เบาะขาด, ลิ้นชักติด), and background disfluencies seamlessly.\
 """
 
 
@@ -437,8 +475,10 @@ async def _call_thaillm(
     try:
         body = resp.json()
         content = body["choices"][0]["message"]["content"]
-        return json.loads(content)
-    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        return _parse_llm_json(content)
+    except (KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
+        raw = resp.text if resp else "(no response)"
+        logger.error("LLM parse failure. Raw response: %s", raw)
         raise LLMUpstreamError(
             detail=f"Failed to parse LLM response: {exc}"
         ) from exc
@@ -485,9 +525,28 @@ async def extract(
 
     crm = CRMFields(**(raw.get("crm_fields") or {}))
 
+    # HomePro triage fields (None when using mock)
+    identity = Identity(**(raw["identity"])) if "identity" in raw else None
+    issue_triage = IssueTriage(**(raw["issue_triage"])) if "issue_triage" in raw else None
+    escalation_logic = EscalationLogic(**(raw["escalation_logic"])) if "escalation_logic" in raw else None
+    after_call_work = None
+    if "after_call_work" in raw:
+        acw = raw["after_call_work"]
+        bluf = BlufNote(**(acw["bluf_note"])) if "bluf_note" in acw else None
+        after_call_work = AfterCallWork(
+            call_disposition=acw.get("call_disposition"),
+            ticket_status=acw.get("ticket_status"),
+            action_deadline=acw.get("action_deadline"),
+            bluf_note=bluf,
+        )
+
     data = ExtractionData(
         extraction_id=f"ext_{uuid.uuid4().hex[:8]}",
         source=request.source,
+        identity=identity,
+        issue_triage=issue_triage,
+        escalation_logic=escalation_logic,
+        after_call_work=after_call_work,
         intent=intent,
         sentiment=sentiment,
         entities=entities,
@@ -501,3 +560,221 @@ async def extract(
     )
 
     return ExtractionResponse(data=data, meta=meta)
+
+
+# ---------------------------------------------------------------------------
+# Audio prompt template
+# ---------------------------------------------------------------------------
+
+AUDIO_SYSTEM_PROMPT = """\
+You are a Thai customer service analysis engine specialising in voice call \
+transcripts. The input is a RAW speech-to-text transcription of a Thai \
+customer service interaction. It WILL contain errors typical of ASR:
+
+## ASR Noise You Must Handle
+- Missing/wrong tones and vowels (e.g. "ซัก" → "สัก", "คัพ" → "ครับ")
+- Missing punctuation and sentence boundaries
+- Speaker turns NOT separated — infer who is customer vs agent from context \
+(agent = formal/polite, customer = asking/complaining)
+- Thai numerals spelled out (e.g. "ศูนย์แปดหนึ่ง" → "081")
+- Romanised Thai mixed in (e.g. "order" pronounced "ออเดอร์")
+- Words joined together without spaces
+
+## Your Task
+1. Mentally reconstruct the corrected Thai transcript
+2. Identify speaker turns (customer vs agent)
+3. Extract the same structured output as for chat analysis
+
+## Output Schema
+{
+  "reconstructed_transcript": "<cleaned Thai text with [customer]/[agent] labels>",
+  "intent": {"primary": "<intent_label>", "confidence": <0.0-1.0>},
+  "sentiment": {"overall": "<positive|negative|neutral|mixed>", "score": <-1.0 to 1.0>},
+  "entities": [
+    {"type": "<entity_type>", "value": "<extracted_value>", "span": "<original_text>"}
+  ],
+  "crm_fields": {
+    "customer_name": "<name or null>",
+    "phone": "<phone or null>",
+    "email": "<email or null>",
+    "order_id": "<order_id or null>",
+    "issue_category": "<category>",
+    "priority": "<low|normal|high|urgent>"
+  }
+}
+
+## Intent Labels
+Use one of: greeting, order_inquiry, shipping_inquiry, product_inquiry, \
+complaint, refund_request, order_cancellation, payment_issue, \
+account_inquiry, general_inquiry.
+
+## Entity Classification Rules
+Each value MUST be assigned exactly ONE entity type.
+
+| Entity Type    | Format & Context Cues |
+|----------------|----------------------|
+| phone_number   | Starts with 0, 9-10 digits. May be spelled out or have spaces. |
+| order_id       | Reference/member/order IDs. Preceded by: order, ออเดอร์, รหัส, หมายเลข, #. |
+| person_name    | Thai or English names. Cues: ชื่อ, คุณ, นาย, นาง. |
+| email          | Standard email format. |
+| product_name   | Products, services, subscription plans. |
+| date           | Dates in any format. |
+| address        | Physical addresses. |
+| company_name   | Business or organisation names. |
+
+## Disambiguation Priority
+1. 0 + 9-10 digits → always phone_number
+2. Preceded by reference keyword → order_id
+3. When ambiguous, prefer the type matching conversational context
+
+## Priority Escalation
+- complaint OR negative sentiment → "high"
+- All other intents → "normal"\
+"""
+
+
+# ---------------------------------------------------------------------------
+# Audio extraction — public API
+# ---------------------------------------------------------------------------
+
+
+async def extract_from_audio(
+    http_client: httpx.AsyncClient,
+    transcript: str,
+    source: str = "other",
+    extract_fields: list[str] | None = None,
+    *,
+    pii_scrub_count: int = 0,
+) -> ExtractionResponse:
+    """Run extraction on an ASR transcript and return a typed response."""
+    from app.schemas.request import DEFAULT_EXTRACT_FIELDS
+
+    if extract_fields is None:
+        extract_fields = list(DEFAULT_EXTRACT_FIELDS)
+
+    start = time.perf_counter()
+
+    if settings.thaillm_api_key == "mock":
+        raw = _mock_extract_audio(transcript)
+    else:
+        raw = await _call_thaillm_audio(http_client, transcript)
+
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+
+    # Map raw dict → typed models
+    intent = Intent(**raw["intent"]) if "intent" in raw and "intent" in extract_fields else None
+    sentiment = (
+        Sentiment(**raw["sentiment"])
+        if "sentiment" in raw and "sentiment" in extract_fields
+        else None
+    )
+
+    entities: list[Entity] = []
+    if "entities" in raw and "entities" in extract_fields:
+        for e in raw["entities"]:
+            entities.append(Entity(**e))
+
+    crm = CRMFields(**(raw.get("crm_fields") or {}))
+
+    data = ExtractionData(
+        extraction_id=f"ext_{uuid.uuid4().hex[:8]}",
+        source=source,
+        reconstructed_transcript=raw.get("reconstructed_transcript"),
+        intent=intent,
+        sentiment=sentiment,
+        entities=entities,
+        crm_fields=crm,
+    )
+
+    meta = Meta(
+        model=settings.thaillm_model,
+        input_type="audio",
+        raw_transcript=transcript,
+        processing_time_ms=elapsed_ms,
+        pii_fields_scrubbed=pii_scrub_count,
+    )
+
+    return ExtractionResponse(data=data, meta=meta)
+
+
+def _mock_extract_audio(transcript: str) -> dict[str, Any]:
+    """Mock audio extraction using the same heuristics as chat."""
+    logger.info("Using MOCK LLM for audio — analysing transcript with heuristics")
+
+    intent = _detect_intent(transcript)
+    sentiment = _detect_sentiment(transcript)
+    entities = _extract_entities(transcript)
+
+    crm: dict[str, Any] = {
+        "customer_name": None,
+        "phone": None,
+        "email": None,
+        "order_id": None,
+        "issue_category": intent["primary"],
+        "priority": "normal",
+    }
+    for ent in entities:
+        if ent["type"] == "person_name" and crm["customer_name"] is None:
+            crm["customer_name"] = ent["value"]
+        elif ent["type"] == "phone_number" and crm["phone"] is None:
+            crm["phone"] = ent["value"]
+        elif ent["type"] == "email" and crm["email"] is None:
+            crm["email"] = ent["value"]
+        elif ent["type"] == "order_id" and crm["order_id"] is None:
+            crm["order_id"] = ent["value"]
+
+    if intent["primary"] == "complaint" or sentiment["overall"] == "negative":
+        crm["priority"] = "high"
+
+    return {
+        "reconstructed_transcript": f"[transcript] {transcript}",
+        "intent": intent,
+        "sentiment": sentiment,
+        "entities": entities,
+        "crm_fields": crm,
+    }
+
+
+async def _call_thaillm_audio(
+    http_client: httpx.AsyncClient,
+    transcript: str,
+) -> dict[str, Any]:
+    """Send the audio transcript to ThaiLLM with the audio-specific prompt."""
+    payload = {
+        "model": settings.thaillm_model,
+        "messages": [
+            {"role": "system", "content": AUDIO_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Transcribe and analyse:\n---\n{transcript}\n---"},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 2048,
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.thaillm_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        resp = await http_client.post(
+            f"{settings.thaillm_base_url}/v1/chat/completions",
+            json=payload,
+            headers=headers,
+        )
+        resp.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise LLMTimeoutError() from exc
+    except httpx.HTTPStatusError as exc:
+        raise LLMUpstreamError(detail=f"ThaiLLM returned {exc.response.status_code}") from exc
+    except httpx.HTTPError as exc:
+        raise LLMUpstreamError(detail=str(exc)) from exc
+
+    try:
+        body = resp.json()
+        content = body["choices"][0]["message"]["content"]
+        return _parse_llm_json(content)
+    except (KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
+        raw = resp.text[:300] if resp else "(no response)"
+        logger.error("LLM audio parse failure. Raw response: %s", raw)
+        raise LLMUpstreamError(
+            detail=f"Failed to parse LLM audio response: {exc}"
+        ) from exc

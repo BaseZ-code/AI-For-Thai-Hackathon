@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # --- PII Scrubbing ---------------------------------------------------
     pii_scrub_enabled: bool = False  # Set to True to re-enable PII scrubbing
 
+    # --- Google Cloud Speech-to-Text ------------------------------------
+    google_stt_api_key: str = "mock"
+    audio_max_size_mb: int = 10
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

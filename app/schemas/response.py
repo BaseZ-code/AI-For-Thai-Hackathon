@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -47,10 +49,69 @@ class CRMFields(BaseModel):
     priority: str = "normal"
 
 
+# ---------------------------------------------------------------------------
+# HomePro-specific triage models
+# ---------------------------------------------------------------------------
+
+
+class Identity(BaseModel):
+    """Customer identity verification fields."""
+
+    customer_phone: str | None = None
+    order_invoice_no: str | None = None
+    product_sku_model: str | None = None
+
+
+class IssueTriage(BaseModel):
+    """Furniture damage triage classification."""
+
+    furniture_damage_type: str | None = None
+    photo_evidence_received: bool = False
+    incident_description: str | None = None
+
+
+class EscalationLogic(BaseModel):
+    """Escalation routing decision."""
+
+    escalation_required: bool = False
+    escalation_target: str | None = None
+    escalation_reason: str | None = None
+
+
+class BlufNote(BaseModel):
+    """Bottom-Line-Up-Front note for Tier-2 handoff."""
+
+    bottom_line: str | None = None
+    context: str | None = None
+    next_steps: str | None = None
+    formatted_text: str | None = None
+
+
+class AfterCallWork(BaseModel):
+    """After-call work (ACW) disposition and ticket tracking."""
+
+    call_disposition: str | None = None
+    ticket_status: str | None = None
+    action_deadline: str | None = None
+    bluf_note: BlufNote | None = None
+
+
+# ---------------------------------------------------------------------------
+# Core response models
+# ---------------------------------------------------------------------------
+
+
 class Meta(BaseModel):
     """Processing metadata."""
 
     model: str = Field(..., description="LLM model identifier used.")
+    input_type: str = Field(
+        default="chat", description="Input type: 'chat' or 'audio'."
+    )
+    raw_transcript: str | None = Field(
+        default=None,
+        description="Raw ASR transcript before LLM cleanup (audio only).",
+    )
     processing_time_ms: int = Field(
         ..., ge=0, description="End-to-end processing time in milliseconds."
     )
@@ -64,6 +125,16 @@ class ExtractionData(BaseModel):
 
     extraction_id: str = Field(..., description="Unique extraction identifier.")
     source: str = Field(..., description="Originating platform.")
+    reconstructed_transcript: str | None = Field(
+        default=None,
+        description="LLM-cleaned transcript (audio pipeline only).",
+    )
+    # HomePro triage fields (populated by real LLM, None in mock mode)
+    identity: Identity | None = None
+    issue_triage: IssueTriage | None = None
+    escalation_logic: EscalationLogic | None = None
+    after_call_work: AfterCallWork | None = None
+    # Standard extraction fields
     intent: Intent | None = None
     sentiment: Sentiment | None = None
     entities: list[Entity] = Field(default_factory=list)

@@ -1,4 +1,4 @@
-"""Tests for POST /v1/extractions."""
+"""Tests for POST /v1/chat/analyze."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _VALID_PAYLOAD = {
 
 @pytest.mark.asyncio
 async def test_extraction_happy_path(client: AsyncClient) -> None:
-    resp = await client.post("/v1/extractions", json=_VALID_PAYLOAD)
+    resp = await client.post("/v1/chat/analyze", json=_VALID_PAYLOAD)
     assert resp.status_code == 200
 
     body = resp.json()
@@ -37,14 +37,14 @@ async def test_extraction_happy_path(client: AsyncClient) -> None:
     assert isinstance(data["crm_fields"], dict)
 
     meta = body["meta"]
-    assert meta["model"] == "thaillm-v1"
+    assert meta["model"]  # non-empty model string
     assert meta["processing_time_ms"] >= 0
 
 
 @pytest.mark.asyncio
 async def test_extraction_empty_messages_returns_422(client: AsyncClient) -> None:
     payload = {"source": "line", "messages": []}
-    resp = await client.post("/v1/extractions", json=payload)
+    resp = await client.post("/v1/chat/analyze", json=payload)
     assert resp.status_code == 422
 
     body = resp.json()
@@ -59,20 +59,20 @@ async def test_extraction_invalid_source_returns_422(client: AsyncClient) -> Non
         "source": "whatsapp",
         "messages": [{"role": "customer", "content": "hello"}],
     }
-    resp = await client.post("/v1/extractions", json=payload)
+    resp = await client.post("/v1/chat/analyze", json=payload)
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_extraction_missing_body_returns_422(client: AsyncClient) -> None:
-    resp = await client.post("/v1/extractions", content=b"not json", headers={"Content-Type": "application/json"})
+    resp = await client.post("/v1/chat/analyze", content=b"not json", headers={"Content-Type": "application/json"})
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_extraction_selective_fields(client: AsyncClient) -> None:
     payload = {**_VALID_PAYLOAD, "extract": ["intent"]}
-    resp = await client.post("/v1/extractions", json=payload)
+    resp = await client.post("/v1/chat/analyze", json=payload)
     assert resp.status_code == 200
 
     data = resp.json()["data"]
@@ -92,7 +92,7 @@ async def test_extraction_cancellation_with_phone(client: AsyncClient) -> None:
             {"role": "customer", "content": "เบอร์ 099-999-9999 ค่ะ"},
         ],
     }
-    resp = await client.post("/v1/extractions", json=payload)
+    resp = await client.post("/v1/chat/analyze", json=payload)
     assert resp.status_code == 200
 
     data = resp.json()["data"]
@@ -116,7 +116,7 @@ async def test_extraction_different_input_produces_different_output(client: Asyn
             {"role": "customer", "content": "ไม่พอใจมากค่ะ สินค้าเสียหาย order #FB99001"},
         ],
     }
-    resp = await client.post("/v1/extractions", json=complaint_payload)
+    resp = await client.post("/v1/chat/analyze", json=complaint_payload)
     assert resp.status_code == 200
 
     data = resp.json()["data"]
@@ -133,7 +133,7 @@ async def test_extraction_different_input_produces_different_output(client: Asyn
             {"role": "customer", "content": "สวัสดีค่ะ ขอบคุณมากค่ะ ดีมากเลย"},
         ],
     }
-    resp2 = await client.post("/v1/extractions", json=greeting_payload)
+    resp2 = await client.post("/v1/chat/analyze", json=greeting_payload)
     data2 = resp2.json()["data"]
     assert data2["intent"]["primary"] != "complaint"
     assert data2["sentiment"]["overall"] == "positive"

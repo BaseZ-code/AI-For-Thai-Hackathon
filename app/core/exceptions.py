@@ -23,3 +23,10 @@ class LLMTimeoutError(ChaiTokeError):
 
     def __init__(self, detail: str = "ThaiLLM request timed out.") -> None:
         super().__init__(detail)
+
+
+class ValidationError(ChaiTokeError):
+    """Custom validation error (e.g. bad file format, oversized upload)."""
+
+    def __init__(self, detail: str = "Validation failed.") -> None:
+        super().__init__(detail)
