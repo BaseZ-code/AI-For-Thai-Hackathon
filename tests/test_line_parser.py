@@ -2,61 +2,81 @@
 
 from __future__ import annotations
 
-import io
-
 import pytest
 from httpx import AsyncClient
 
 _SAMPLE_LOG = """\
 2026.08.15 Saturday
-12:56\tnongtajkrub\tnongtajkrub added celi, วันตะ, Pattawan, data. to the group.
-15:06\tnongtajkrub\t@All  หวัดดีจ้าชาวamerica เดี๋ยววันจันทร์ตอน 9:10 เราขอเรียกทุกคนมาประชุมที่ห้อง D11 นะ
-15:08\tceli\tStickers
-16:23\tdata.\tStickers
-22:30\tdata.\tวันจันทร์หนูได้ถึง 5 โมงน้าาา @nongtajkrub
-22:32\tnongtajkrub\tอะเคค
-2026.08.17 Monday
-09:17\tnongtajkrub\t@วันตะ เช้านี้มามั้ยย
+15:06\tcustomer1\tสวัสดีครับ ได้รับโต๊ะแล้วแต่ขาหัก
+15:08\tagent1\tต้องขออภัยด้วยนะคะ ขอทราบเลขที่ใบเสร็จได้ไหมคะ
+15:10\tcustomer1\tHP-INV-99824 ครับ
+15:12\tagent1\tรบกวนส่งรูปมาทาง LINE OA นะคะ
 """
+
+_THREE_PARTICIPANT_LOG = """\
+2026.08.15 Saturday
+15:06\tuser1\tHello
+15:08\tuser2\tHi
+15:10\tuser3\tHey
+"""
+
 
 @pytest.mark.asyncio
 async def test_line_parse_happy_path(client: AsyncClient) -> None:
-    """Parser should extract text messages and filter stickers/system msgs."""
+    """Parser should map usernames to customer/agent roles."""
     resp = await client.post(
         "/v1/line/parse",
-        json={"source": "line", "messages": _SAMPLE_LOG},
+        json={
+            "source": "line",
+            "messages": _SAMPLE_LOG,
+            "customer_name": "customer1",
+            "agent_name": "agent1",
+        },
     )
     assert resp.status_code == 200
 
     body = resp.json()
     assert body["source"] == "line"
-    assert isinstance(body["messages"], list)
-    assert isinstance(body["metadata"], dict)
-
-    # Should have filtered out: 1 system msg (added to group) + 2 stickers = 3 filtered
-    meta = body["metadata"]
-    assert meta["filtered_system_messages"] == 3
-
-    # Should have 4 text messages remaining
-    assert meta["total_messages"] == 4
-
-    # Check participants
-    assert "nongtajkrub" in meta["participants"]
-    assert "data." in meta["participants"]
-
-    # Check first message content
     msgs = body["messages"]
-    assert msgs[0]["role"] == "nongtajkrub"
-    assert "หวัดดีจ้า" in msgs[0]["content"]
+    assert len(msgs) == 4
+
+    # Roles should be mapped
+    assert msgs[0]["role"] == "customer"
+    assert msgs[1]["role"] == "agent"
+    assert msgs[2]["role"] == "customer"
+    assert msgs[3]["role"] == "agent"
+
+    # Content preserved
+    assert "ขาหัก" in msgs[0]["content"]
     assert msgs[0]["timestamp"] is not None
+
+    # Output should be directly compatible with /v1/chat/analyze
+    assert "metadata" not in body
+    assert "extract" in body
 
 
 @pytest.mark.asyncio
-async def test_line_parse_empty_body(client: AsyncClient) -> None:
-    """Empty messages should return 422."""
+async def test_line_parse_rejects_three_participants(client: AsyncClient) -> None:
+    """Logs with more than 2 participants should be rejected."""
     resp = await client.post(
         "/v1/line/parse",
-        json={"source": "line", "messages": ""},
+        json={
+            "source": "line",
+            "messages": _THREE_PARTICIPANT_LOG,
+            "customer_name": "user1",
+            "agent_name": "user2",
+        },
+    )
+    assert resp.status_code == 422
+    assert "3 participants" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_line_parse_missing_names(client: AsyncClient) -> None:
+    """customer_name and agent_name are required fields."""
+    resp = await client.post(
+        "/v1/line/parse",
+        json={"source": "line", "messages": _SAMPLE_LOG},
     )
     assert resp.status_code == 422
 
@@ -68,30 +88,43 @@ async def test_line_parse_multiline_message(client: AsyncClient) -> None:
 2026.08.15 Saturday
 15:06\tuser1\tFirst line
 Second line of the same message
-Third line too
 16:00\tuser2\tAnother message
 """
     resp = await client.post(
         "/v1/line/parse",
-        json={"source": "line", "messages": log},
+        json={
+            "source": "line",
+            "messages": log,
+            "customer_name": "user1",
+            "agent_name": "user2",
+        },
     )
     assert resp.status_code == 200
     msgs = resp.json()["messages"]
     assert len(msgs) == 2
     assert "First line\nSecond line" in msgs[0]["content"]
-    assert "Third line" in msgs[0]["content"]
+    assert msgs[0]["role"] == "customer"
+    assert msgs[1]["role"] == "agent"
 
 
 @pytest.mark.asyncio
-async def test_line_parse_includes_extract_fields(client: AsyncClient) -> None:
-    """Extract fields should be passed through in response."""
+async def test_line_parse_filters_system_messages(client: AsyncClient) -> None:
+    """System messages and stickers should be filtered out."""
+    log = """\
+2026.08.15 Saturday
+12:56\tuser1\tuser1 added user2 to the group.
+15:06\tuser1\tHello
+15:08\tuser2\tStickers
+15:10\tuser2\tHi there
+"""
     resp = await client.post(
         "/v1/line/parse",
         json={
             "source": "line",
-            "messages": "2026.08.15 Saturday\n10:00\tuser\tHello",
-            "extract": ["intent"],
+            "messages": log,
+            "customer_name": "user1",
+            "agent_name": "user2",
         },
     )
     assert resp.status_code == 200
-    assert resp.json()["extract"] == ["intent"]
+    assert len(resp.json()["messages"]) == 2

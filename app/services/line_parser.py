@@ -51,12 +51,23 @@ def _is_system_message(username: str, content: str) -> bool:
     return False
 
 
-def parse_line_log(raw_text: str) -> dict[str, Any]:
+def parse_line_log(
+    raw_text: str,
+    *,
+    role_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Parse a raw LINE chat export into structured messages.
+
+    Args:
+        raw_text: The raw LINE chat export text.
+        role_map: Optional mapping of username → role (e.g. {"alice": "customer", "bob": "agent"}).
 
     Returns a dict with:
       - messages: list of parsed message dicts
       - metadata: parsing stats (participants, filtered count, etc.)
+
+    Raises:
+        ValueError: If more than 2 participants are found in the log.
     """
     lines = raw_text.strip().splitlines()
     messages: list[dict[str, Any]] = []
@@ -109,8 +120,12 @@ def parse_line_log(raw_text: str) -> dict[str, Any]:
                     pass
 
             participants.add(username)
+
+            # Map username → role if role_map provided
+            role = role_map.get(username, username) if role_map else username
+
             current_msg = {
-                "role": username,
+                "role": role,
                 "content": content,
                 "timestamp": timestamp,
             }
@@ -123,6 +138,14 @@ def parse_line_log(raw_text: str) -> dict[str, Any]:
     if current_msg is not None:
         messages.append(current_msg)
 
+    # Validate: only 2 participants allowed
+    if len(participants) > 2:
+        raise ValueError(
+            f"LINE log contains {len(participants)} participants "
+            f"({', '.join(sorted(participants))}), but only 2 are allowed. "
+            f"Please provide a 1-on-1 customer/agent conversation."
+        )
+
     return {
         "messages": messages,
         "metadata": {
@@ -131,3 +154,4 @@ def parse_line_log(raw_text: str) -> dict[str, Any]:
             "participants": sorted(participants),
         },
     }
+
