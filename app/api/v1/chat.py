@@ -1,4 +1,4 @@
-"""POST /v1/extractions — main extraction endpoint."""
+"""POST /v1/chat/analyze — chat log extraction endpoint."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from app.schemas.response import ExtractionResponse
 from app.services import pii as pii_service
 from app.services import llm as llm_service
 
-extractions_router = APIRouter()
+chat_router = APIRouter()
 
 
-@extractions_router.post(
-    "/extractions",
+@chat_router.post(
+    "/chat/analyze",
     response_model=ExtractionResponse,
     summary="Extract structured data from chat logs",
     description=(
@@ -22,7 +22,7 @@ extractions_router = APIRouter()
         "with intent recognition, sentiment analysis, and entity extraction."
     ),
 )
-async def create_extraction(
+async def analyze_chat(
     body: ExtractionRequest,
     request: Request,
 ) -> ExtractionResponse:
@@ -46,4 +46,3 @@ async def create_extraction(
     )
 
     return result
-

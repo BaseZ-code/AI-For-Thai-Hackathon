@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.core.exceptions import LLMTimeoutError, LLMUpstreamError
+from app.core.exceptions import LLMTimeoutError, LLMUpstreamError, ValidationError
 from app.schemas.errors import FieldError, ProblemDetail
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,17 @@ def register_exception_handlers(app: FastAPI) -> None:
             type=f"{_ERROR_BASE}/llm-timeout",
             title="LLM Timeout",
             status=504,
+            detail=exc.detail,
+            instance=str(_request.url.path),
+        )
+        return _problem_response(problem)
+
+    @app.exception_handler(ValidationError)
+    async def custom_validation_handler(_request: Request, exc: ValidationError) -> JSONResponse:
+        problem = ProblemDetail(
+            type=f"{_ERROR_BASE}/validation-error",
+            title="Validation Error",
+            status=422,
             detail=exc.detail,
             instance=str(_request.url.path),
         )

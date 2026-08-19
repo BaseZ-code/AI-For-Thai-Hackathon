@@ -8,8 +8,9 @@ from typing import AsyncIterator
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-# Force mock LLM mode for all tests
+# Force mock mode for all tests
 os.environ["THAILLM_API_KEY"] = "mock"
+os.environ["GOOGLE_STT_API_KEY"] = "mock"
 
 from app.main import app  # noqa: E402 — import after env override
 
