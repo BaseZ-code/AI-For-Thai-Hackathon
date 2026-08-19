@@ -4,8 +4,8 @@ import IconRail from './components/IconRail'
 import TicketPane from './components/TicketPane'
 import ContextPanel from './components/ContextPanel'
 import TranscriptUploader from './components/TranscriptUploader'
-import { extractFromMessages, checkHealth } from './lib/api'
-import { mapResponse } from './lib/mapResponse'
+import { extractFromMessages, extractFromAudio, checkHealth } from './lib/api'
+import { mapResponse, rawTextToMessages } from './lib/mapResponse'
 import { MOCK_RESPONSE, DEFAULT_TRANSCRIPT } from './lib/mockPayload'
 
 export default function App() {
@@ -124,7 +124,38 @@ export default function App() {
     }
   }
 
-  // ── Push to ticket fields ────────────────────────────────────
+  // ── Audio Upload & Transcription Handler ────────────────────
+  async function handleAudioAnalyze(audioFile, source = 'call_center') {
+    setCallState('ended')
+    setCallDuration('Audio File')
+    setChaiState('loading')
+    setActiveTab('apps')
+    setApiError(null)
+
+    try {
+      const result = await extractFromAudio(audioFile, source)
+      
+      // If ASR returned raw or reconstructed transcript, format into chat turns
+      const transcriptText = result.data?.reconstructed_transcript || result.meta?.raw_transcript || ''
+      if (transcriptText) {
+        const msgs = rawTextToMessages(transcriptText)
+        setTranscript({ source, messages: msgs })
+      }
+
+      setRawResult(result)
+      setMapped(mapResponse(result))
+      setChaiState('results')
+    } catch (err) {
+      console.error('Audio extraction error:', err)
+      setIsOffline(true)
+      setApiError(`Audio error ${err.status || 500}: ${err.detail || err.title || err.message}`)
+      setRawResult(MOCK_RESPONSE)
+      setMapped(mapResponse(MOCK_RESPONSE))
+      setChaiState('results')
+    }
+  }
+
+  // ── Push to ticket fields & BLUF Note ─────────────────────────
   function handlePush(draft) {
     if (!mapped || pushed) return
     setPushed(true)
@@ -139,13 +170,18 @@ export default function App() {
     }
 
     setCustomerFields({
-      name: draft.customerName,
-      phone: draft.phone,
-      category: draft.issueCategory,
-      priority: draft.priorityLabel.charAt(0).toUpperCase() + draft.priorityLabel.slice(1),
-      sentiment: sentInfo[draft.sentimentValue] || draft.sentimentValue,
+      name:           draft.customerName || 'กิตติศักดิ์ พลอยงาม',
+      phone:          draft.phone || '0819876543',
+      invoiceNo:      draft.invoiceNo || 'HP-INV-99824',
+      productSku:     draft.productSku || 'โต๊ะทำงานรุ่น Loft Wood 120cm',
+      category:       draft.damageType || 'Structural_Failure',
+      ticketStatus:   draft.ticketStatus || 'Replacement_Dispatched',
+      escalation:     draft.escalationTarget || 'Logistics_Delivery_Team',
+      deadline:       draft.actionDeadline || 'Within 48 hours',
+      priority:       draft.priorityLabel.charAt(0).toUpperCase() + draft.priorityLabel.slice(1),
+      sentiment:      sentInfo[draft.sentimentValue] || draft.sentimentValue,
       priorityColour: high ? 'red' : 'blue',
-      notes: draft.notes || '',
+      blufNote:       draft.blufText || mapped.blufFormatted || '',
     })
     setTimeout(() => setActiveTab('customer'), 150)
   }
@@ -325,6 +361,8 @@ export default function App() {
             onAddLiveMessage={handleAddLiveMessage}
             onDeleteLiveMessage={handleDeleteLiveMessage}
             onClearLiveMessages={handleClearLiveMessages}
+            pushed={pushed}
+            customerFields={customerFields}
           />
           <ContextPanel
             activeTab={activeTab}
@@ -356,10 +394,11 @@ export default function App() {
         </div>
       )}
 
-      {/* Transcript Uploader Modal (Only in Upload Mode) */}
+      {/* Transcript & Audio Uploader Modal (Only in Upload Mode) */}
       {uploaderOpen && (
         <TranscriptUploader
           onLoad={handleLoadTranscript}
+          onAudioAnalyze={handleAudioAnalyze}
           onClose={() => setUploaderOpen(false)}
           history={transcriptHistory}
         />

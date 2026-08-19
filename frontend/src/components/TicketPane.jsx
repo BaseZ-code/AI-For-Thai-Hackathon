@@ -37,6 +37,8 @@ export default function TicketPane({
   onAddLiveMessage,
   onDeleteLiveMessage,
   onClearLiveMessages,
+  pushed,
+  customerFields,
 }) {
   const ended = callState === 'ended'
   const high = priorityColour === 'red'
@@ -45,6 +47,16 @@ export default function TicketPane({
 
   const [activeRole, setActiveRole] = useState('customer')
   const [inputText, setInputText] = useState('')
+  const [composerTab, setComposerTab] = useState('reply')
+  const [composerText, setComposerText] = useState('')
+
+  // When BLUF note is pushed, auto-switch to Internal Note and prefill with formatted BLUF text
+  useEffect(() => {
+    if (pushed && customerFields?.blufNote) {
+      setComposerTab('note')
+      setComposerText(customerFields.blufNote)
+    }
+  }, [pushed, customerFields?.blufNote])
 
   // Decide which messages to render: in live mode use liveMessages, otherwise transcript.messages
   const displayMessages = transcriptMode === 'live' 
@@ -67,7 +79,6 @@ export default function TicketPane({
       timestamp: new Date().toISOString(),
     })
     setInputText('')
-    // Toggle role automatically for smooth conversation flow
     setActiveRole(r => r === 'customer' ? 'agent' : 'customer')
     inputRef.current?.focus()
   }
@@ -84,7 +95,7 @@ export default function TicketPane({
 
   function handleExportJson() {
     const payload = {
-      source: transcript?.source || 'line',
+      source: transcript?.source || 'call_center',
       messages: liveMessages,
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
@@ -109,7 +120,7 @@ export default function TicketPane({
       {/* ── Ticket Header ── */}
       <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--zd-border)', flexShrink: 0, background: '#ffffff' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <div style={{ fontSize: 11, color: 'var(--zd-text-muted)' }}>Ticket #4471 · Assigned to you</div>
+          <div style={{ fontSize: 11, color: 'var(--zd-text-muted)' }}>Ticket #4471 · HomePro 24/7 Call Care</div>
           {transcriptMode === 'live' && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 6,
@@ -122,12 +133,12 @@ export default function TicketPane({
           )}
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 8 }}>
-          ร้องเรียนปัญหาการเรียกเก็บเงิน
+          ร้องเรียนปัญหาขาโต๊ะทำงานแตกหัก (เคลมเปลี่ยนตัวใหม่)
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151', fontWeight: 500 }}>
-            <Avatar initials="สจ" gradient="linear-gradient(135deg,#667eea,#764ba2)" />
-            Somchai Janthong
+            <Avatar initials="กพ" gradient="linear-gradient(135deg,#667eea,#764ba2)" />
+            {customerFields?.name || 'กิตติศักดิ์ พลอยงาม'}
           </div>
           <span style={{ color: '#d1d5db' }}>·</span>
           <Badge bg="#fef3c7" color="#92400e" border="#fde68a">⏺ Open</Badge>
@@ -138,13 +149,11 @@ export default function TicketPane({
           >
             {high ? 'High' : 'Normal'}
           </Badge>
-          <Chip>billing</Chip>
-          <Chip>refund</Chip>
-          {transcript?.source && (
-            <Chip style={{ textTransform: 'capitalize', background: '#f0f9ff', color: '#0369a1', border: '1px solid #bae6fd' }}>
-              {transcript.source}
-            </Chip>
-          )}
+          <Chip>broken-furniture</Chip>
+          <Chip>14-day-swap</Chip>
+          <Chip style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', fontWeight: 700 }}>
+            HomeCard Verified
+          </Chip>
         </div>
       </div>
 
@@ -161,7 +170,7 @@ export default function TicketPane({
           background: '#fafafa',
         }}
       >
-        <SystemMsg icon="📞">Inbound call connected — Thailand CTI · {new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</SystemMsg>
+        <SystemMsg icon="📞">Inbound call connected — HomePro 24/7 Call Center · {new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</SystemMsg>
 
         {/* In Upload Mode (Active): show default placeholder */}
         {transcriptMode === 'upload' && !ended && (
@@ -176,13 +185,13 @@ export default function TicketPane({
                 background: '#ffffff', border: '1px solid var(--zd-border)',
                 borderRadius: '0 8px 8px 8px', padding: '10px 12px',
               }}>
-                สวัสดีครับ ยินดีต้อนรับสู่ศูนย์บริการลูกค้า วันนี้มีอะไรให้ช่วยได้บ้างครับ
+                สวัสดีครับ ศูนย์บริการลูกค้าโฮมโปร 24 ชั่วโมง ยินดีให้บริการครับ วันนี้มีอะไรให้ผมดูแลครับ
               </div>
             </div>
           </div>
         )}
 
-        {/* Render chat bubbles (Live Mode stream OR Upload Mode results) */}
+        {/* Render chat bubbles */}
         {displayMessages.map((msg, i) => {
           const style = ROLE_STYLE[msg.role] || ROLE_STYLE.agent
           const isCustomer = msg.role === 'customer'
@@ -374,7 +383,7 @@ export default function TicketPane({
           </div>
         </div>
       ) : (
-        /* ── Standard Zendesk Reply Composer (Upload Mode or Post-Call) ── */
+        /* ── Standard Zendesk Reply / Internal Note Composer ── */
         <div style={{
           borderTop: '1px solid var(--zd-border)',
           padding: '12px 20px',
@@ -384,23 +393,31 @@ export default function TicketPane({
           pointerEvents: ended ? 'auto' : 'none',
           transition: 'opacity 0.3s',
         }}>
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--zd-border)', marginBottom: 10 }}>
-            <ComposerTab active>Reply</ComposerTab>
-            <ComposerTab>Internal Note</ComposerTab>
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--zd-border)', marginBottom: 8 }}>
+            <ComposerTab active={composerTab === 'reply'} onClick={() => setComposerTab('reply')}>
+              Public Reply
+            </ComposerTab>
+            <ComposerTab active={composerTab === 'note'} onClick={() => setComposerTab('note')}>
+              📝 Internal Note {customerFields?.blufNote && <span style={{ fontSize: 9, background: '#fef3c7', color: '#92400e', padding: '1px 5px', borderRadius: 99, marginLeft: 4 }}>BLUF Auto-Filled</span>}
+            </ComposerTab>
           </div>
           <textarea
-            placeholder={ended ? "Write a reply to the customer…" : "Chat console is read-only during call simulation…"}
+            value={composerText}
+            onChange={e => setComposerText(e.target.value)}
+            placeholder={ended ? (composerTab === 'note' ? "Write internal handover notes..." : "Write a reply to the customer…") : "Chat console is read-only during call simulation…"}
             style={{
               width: '100%',
-              height: 60,
-              border: '1px solid var(--zd-border)',
+              height: 68,
+              border: `1px solid ${composerTab === 'note' ? '#fde68a' : 'var(--zd-border)'}`,
               borderRadius: 6,
               padding: '8px 12px',
-              fontSize: 13,
-              color: '#374151',
-              background: '#f9fafb',
+              fontSize: 12,
+              color: composerTab === 'note' ? '#78350f' : '#374151',
+              background: composerTab === 'note' ? '#fffbeb' : '#f9fafb',
               resize: 'none',
               outline: 'none',
+              fontFamily: 'Inter, sans-serif',
+              lineHeight: 1.45,
             }}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
@@ -409,6 +426,23 @@ export default function TicketPane({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function ComposerTab({ children, active, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        padding: '6px 12px', fontSize: 12, fontWeight: 600,
+        color: active ? 'var(--zd-blue)' : 'var(--zd-text-muted)',
+        borderBottom: active ? '2px solid var(--zd-blue)' : '2px solid transparent',
+        cursor: 'pointer',
+        display: 'flex', alignItems: 'center',
+      }}
+    >
+      {children}
     </div>
   )
 }
@@ -455,17 +489,6 @@ function SystemMsg({ icon, children, animate }) {
       <span>{icon}</span><span>{children}</span>
       <span style={{ flex: 1, height: 1, background: 'var(--zd-border)', display: 'block' }} />
     </div>
-  )
-}
-
-function ComposerTab({ children, active }) {
-  return (
-    <div style={{
-      padding: '6px 12px', fontSize: 12, fontWeight: 500,
-      color: active ? 'var(--zd-blue)' : 'var(--zd-text-muted)',
-      borderBottom: active ? '2px solid var(--zd-blue)' : '2px solid transparent',
-      cursor: 'pointer',
-    }}>{children}</div>
   )
 }
 
