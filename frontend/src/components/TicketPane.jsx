@@ -133,12 +133,12 @@ export default function TicketPane({
           )}
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', marginBottom: 8 }}>
-          ร้องเรียนปัญหาขาโต๊ะทำงานแตกหัก (เคลมเปลี่ยนตัวใหม่)
+          Demo Ticket
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151', fontWeight: 500 }}>
-            <Avatar initials="กพ" gradient="linear-gradient(135deg,#667eea,#764ba2)" />
-            {customerFields?.name || 'กิตติศักดิ์ พลอยงาม'}
+            <Avatar initials="DU" gradient="linear-gradient(135deg,#667eea,#764ba2)" />
+            {customerFields?.name && customerFields.name !== '[UNIDENTIFIED_CUSTOMER]' ? customerFields.name : 'Demo User'}
           </div>
           <span style={{ color: '#d1d5db' }}>·</span>
           <Badge bg="#fef3c7" color="#92400e" border="#fde68a">⏺ Open</Badge>
@@ -149,8 +149,7 @@ export default function TicketPane({
           >
             {high ? 'High' : 'Normal'}
           </Badge>
-          <Chip>broken-furniture</Chip>
-          <Chip>14-day-swap</Chip>
+          <Chip>demo-session</Chip>
           <Chip style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', fontWeight: 700 }}>
             HomeCard Verified
           </Chip>

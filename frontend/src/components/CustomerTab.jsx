@@ -23,16 +23,16 @@ export default function CustomerTab({ fields, pushed }) {
         <SectionTitle>HomeCard Customer Identity</SectionTitle>
         <div style={{ background:'white', border:'1px solid var(--zd-border)', borderRadius:8, padding:12 }}>
           <FieldRow label="Full Name">
-            <FieldVal>{fields?.name || 'กิตติศักดิ์ พลอยงาม'}</FieldVal>
+            <FieldVal>{fields?.name || 'Demo User'}</FieldVal>
           </FieldRow>
           <FieldRow label="HomeCard Phone">
             <FieldVal flash={flash.phone} empty={!fields?.phone}>
-              {fields?.phone || '0819876543'}
+              {fields?.phone || '—'}
             </FieldVal>
           </FieldRow>
           <FieldRow label="Invoice / Receipt #" last>
             <FieldVal flash={flash.invoiceNo} empty={!fields?.invoiceNo}>
-              {fields?.invoiceNo || 'HP-INV-99824'}
+              {fields?.invoiceNo || '—'}
             </FieldVal>
           </FieldRow>
         </div>
@@ -43,31 +43,31 @@ export default function CustomerTab({ fields, pushed }) {
         <SectionTitle>After-Call Work & Triage</SectionTitle>
         <div style={{ background:'white', border:'1px solid var(--zd-border)', borderRadius:8, padding:12 }}>
           <TfRow label="Product SKU / Model">
-            <TfVal flash={flash.productSku} empty={!fields?.productSku}>{fields?.productSku || 'โต๊ะทำงานรุ่น Loft Wood 120cm'}</TfVal>
+            <TfVal flash={flash.productSku} empty={!fields?.productSku}>{fields?.productSku || '—'}</TfVal>
           </TfRow>
           <TfRow label="Damage Classification">
             <TfVal flash={flash.category} empty={!fields?.category}>
-              <span style={{ color:'#dc2626', fontWeight:700 }}>
-                {fields?.category || 'Structural_Failure'}
+              <span style={{ color: fields?.category ? '#dc2626' : '#9ca3af', fontWeight: 700 }}>
+                {fields?.category || '—'}
               </span>
             </TfVal>
           </TfRow>
           <TfRow label="Ticket Status">
             <TfVal flash={flash.status}>
-              <span style={{ padding:'2px 6px', borderRadius:4, fontSize:10, fontWeight:700, background:'#f0fdf4', color:'#16a34a', border:'1px solid #bbf7d0' }}>
-                {fields?.ticketStatus || 'Replacement_Dispatched'}
+              <span style={{ padding:'2px 6px', borderRadius:4, fontSize:10, fontWeight:700, background: fields?.ticketStatus ? '#f0fdf4' : '#f3f4f6', color: fields?.ticketStatus ? '#16a34a' : '#6b7280', border: `1px solid ${fields?.ticketStatus ? '#bbf7d0' : '#e5e7eb'}` }}>
+                {fields?.ticketStatus || 'Pending'}
               </span>
             </TfVal>
           </TfRow>
           <TfRow label="Escalation Route">
             <TfVal flash={flash.escalation}>
-              <span style={{ padding:'2px 6px', borderRadius:4, fontSize:10, fontWeight:700, background:'#eff6ff', color:'#1d4ed8', border:'1px solid #bfdbfe' }}>
-                {fields?.escalation || 'Logistics_Delivery_Team'}
+              <span style={{ padding:'2px 6px', borderRadius:4, fontSize:10, fontWeight:700, background: fields?.escalation ? '#eff6ff' : '#f3f4f6', color: fields?.escalation ? '#1d4ed8' : '#6b7280', border: `1px solid ${fields?.escalation ? '#bfdbfe' : '#e5e7eb'}` }}>
+                {fields?.escalation || '—'}
               </span>
             </TfVal>
           </TfRow>
           <TfRow label="Action SLA Deadline">
-            <TfVal flash={flash.deadline}>{fields?.deadline || 'Within 48 hours'}</TfVal>
+            <TfVal flash={flash.deadline}>{fields?.deadline || '—'}</TfVal>
           </TfRow>
           <TfRow label="Priority" last>
             <TfVal flash={flash.priority}>
@@ -77,7 +77,7 @@ export default function CustomerTab({ fields, pushed }) {
                 color:      high ? '#991b1b' : '#1d4ed8',
                 border:     `1px solid ${high ? '#fecaca' : '#bfdbfe'}`,
               }}>
-                {fields?.priority || 'High'}
+                {fields?.priority || 'Normal'}
               </span>
             </TfVal>
           </TfRow>

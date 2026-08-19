@@ -63,7 +63,7 @@ export default function CtiBar({
       {/* Caller */}
       <span style={{ color:'#e2e8f0', fontSize:13, fontWeight:500 }}>
         +66 81 234 5678&nbsp;
-        <span style={{ color:'#94a3b8', fontSize:11, fontWeight:400 }}>Somchai J.</span>
+        <span style={{ color:'#94a3b8', fontSize:11, fontWeight:400 }}>Demo User</span>
       </span>
 
       {/* Timer */}
