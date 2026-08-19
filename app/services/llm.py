@@ -595,9 +595,24 @@ The raw audio transcription WILL contain acoustic and speech-to-text noise. You 
    - The raw speech stream may lack speaker labels. Infer turns from conversational intent:
      * `[agent]`: Polite opening ("ศูนย์บริการลูกค้าโฮมโปร สวัสดีครับ"), asking for info ("ขอทราบเบอร์โทร", "ขอเลขที่ใบเสร็จ"), offering warranty solutions.
      * `[customer]`: Reporting issues ("ขาโต๊ะหัก", "ประกอบไม่ได้"), providing member info, expressing frustration.
+   - **CRITICAL: NEVER fabricate or invent dialogue.** Only label and clean up speech that actually exists in the raw transcript. If only one speaker is present in the audio, ALL turns belong to that single speaker. Do NOT generate fictional agent or customer responses to "fill in" a conversation.
 
 4. **Zero-Width Space & Word Concatenation**:
    - Separate fused Thai words accurately (เช่น "โต๊ะทำงานรุ่นloftwoodขาหัก" ➔ "โต๊ะทำงานรุ่น Loft Wood ขาหัก").
+
+## ⚠️ Anti-Hallucination Rule (MANDATORY)
+
+The `reconstructed_transcript` must contain ONLY words and sentences that were actually spoken in the raw ASR input. You may:
+- Fix spelling, tones, and punctuation
+- Add speaker labels ([agent] / [customer])
+- Separate fused words
+
+You must NEVER:
+- Invent new dialogue turns that do not exist in the input
+- Add agent responses that were not spoken
+- Create fictional conversational context to make the transcript "look complete"
+
+If the audio contains only a customer monologue, the reconstructed transcript must be a customer monologue.
 
 ---
 
