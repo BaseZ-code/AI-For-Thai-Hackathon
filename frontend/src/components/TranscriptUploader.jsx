@@ -43,11 +43,34 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
   async function startRecording() {
     setError(null)
     setAudioFile(null)
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError('Live recording requires HTTPS or localhost, which is not supported in this environment. Please use file upload instead.')
+      return
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       audioChunksRef.current = []
       
-      const mediaRecorder = new MediaRecorder(stream)
+      // Determine best supported MIME type across Chrome, Firefox, Safari
+      let mimeType = 'audio/webm'
+      let fileExt = 'webm'
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus'
+        fileExt = 'webm'
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4'
+        fileExt = 'm4a'
+      } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+        mimeType = 'audio/ogg'
+        fileExt = 'ogg'
+      } else if (MediaRecorder.isTypeSupported('audio/wav')) {
+        mimeType = 'audio/wav'
+        fileExt = 'wav'
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
       mediaRecorderRef.current = mediaRecorder
 
       mediaRecorder.ondataavailable = e => {
@@ -55,20 +78,30 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
       }
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
-        const file = new File([audioBlob], `mic-recording-${Date.now()}.wav`, { type: 'audio/wav' })
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' })
+        // Use extension matched to recorded audio
+        const file = new File([audioBlob], `mic-recording-${Date.now()}.${fileExt === 'webm' ? 'm4a' : fileExt}`, { 
+          type: mimeType || 'audio/webm' 
+        })
         setAudioFile(file)
         stream.getTracks().forEach(t => t.stop())
       }
 
-      mediaRecorder.start()
+      mediaRecorder.start(250) // slice every 250ms for smooth chunks
       setIsRecording(true)
       setRecordSeconds(0)
       timerIntervalRef.current = setInterval(() => {
         setRecordSeconds(s => s + 1)
       }, 1000)
     } catch (err) {
-      setError('Microphone access denied or not supported in this browser. Please use file upload.')
+      console.error('Microphone access error:', err)
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setError('Microphone permission was denied by your browser. Please click the 🔒 / 🎙️ icon in your address bar and allow Microphone access.')
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setError('No microphone found on this device. Please connect a microphone or use file upload.')
+      } else {
+        setError(`Microphone error (${err.name || 'Unknown'}): ${err.message}. Please use audio file upload.`)
+      }
     }
   }
 
