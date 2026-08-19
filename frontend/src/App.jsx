@@ -68,6 +68,11 @@ export default function App() {
     setChaiState('loading')
     setActiveTab('apps')
     setApiError(null)
+    // Wipe out all previous ticket data immediately
+    setMapped(null)
+    setRawResult(null)
+    setPushed(false)
+    setCustomerFields(null)
 
     // Determine payload based on current mode
     let targetPayload
@@ -116,6 +121,11 @@ export default function App() {
     setChaiState('loading')
     setActiveTab('apps')
     setApiError(null)
+    // Wipe out all previous ticket data immediately
+    setMapped(null)
+    setRawResult(null)
+    setPushed(false)
+    setCustomerFields(null)
 
     try {
       const result = await extractFromAudio(audioFile, source)

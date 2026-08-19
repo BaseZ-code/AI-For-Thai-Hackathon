@@ -26,9 +26,27 @@ export default function ChaiTokeCard({ chaiState, mapped, rawResult, isOffline, 
 
   // Editable draft
   const [draft, setDraft] = useState(null)
+  const [loadingStep, setLoadingStep] = useState(0)
 
+  // Loading animation step ticker
   useEffect(() => {
-    if (mapped && !draft) {
+    if (chaiState !== 'loading') {
+      setLoadingStep(0)
+      return
+    }
+    const interval = setInterval(() => {
+      setLoadingStep(s => (s < 2 ? s + 1 : s))
+    }, 750)
+    return () => clearInterval(interval)
+  }, [chaiState])
+
+  // Sync draft cleanly with mapped response, wiping immediately when loading begins
+  useEffect(() => {
+    if (chaiState === 'loading') {
+      setDraft(null)
+      return
+    }
+    if (mapped) {
       setDraft({
         customerName:       mapped.customerName       || '',
         phone:              mapped.phone              || '',
@@ -42,12 +60,14 @@ export default function ChaiTokeCard({ chaiState, mapped, rawResult, isOffline, 
         ticketStatus:       mapped.ticketStatus       || 'Replacement_Dispatched',
         actionDeadline:     mapped.actionDeadline     || 'Within 48 hours',
         priorityLabel:      (mapped.priorityLabel     || 'high').toLowerCase(),
-        sentimentValue:     mapped.sentimentLabel === 'Frustrated' ? 'negative' : 'neutral',
+        sentimentValue:     mapped.sentimentOverall   || 'neutral',
         blufText:           mapped.blufFormatted      || '',
         notes: '',
       })
+    } else {
+      setDraft(null)
     }
-  }, [mapped])
+  }, [mapped, chaiState])
 
   function handlePush() {
     onPush(draft)
@@ -106,16 +126,35 @@ export default function ChaiTokeCard({ chaiState, mapped, rawResult, isOffline, 
             <div style={{ padding:'20px 14px', textAlign:'center' }}>
               <div style={{ fontSize:28, marginBottom:8 }}>⏳</div>
               <div style={{ fontSize:12, color:'#92400e', fontWeight:500, lineHeight:1.5 }}>Waiting for Call Session</div>
-              <div style={{ fontSize:11, color:'#b45309', marginTop:4 }}>ChaiToke will auto-generate HomePro Triage & BLUF note upon call completion.</div>
+              <div style={{ fontSize:11, color:'#b45309', marginTop:4 }}>ChaiToke will auto-generate HomePro Triage & BLUF note upon session completion.</div>
             </div>
           )}
 
-          {/* LOADING */}
+          {/* LOADING (High-Fidelity Multi-Stage AI Triaging Animation) */}
           {chaiState === 'loading' && (
-            <div style={{ padding:'24px 14px', textAlign:'center' }}>
-              <div style={{ width:28, height:28, borderRadius:'50%', border:'3px solid var(--ct-mid)', borderTopColor:'var(--ct-orange)', animation:'spin 0.8s linear infinite', margin:'0 auto 12px' }} />
-              <div style={{ fontSize:12, fontWeight:600, color:'var(--ct-dark)' }}>Triaging call with Thai LLM…</div>
-              <div style={{ fontSize:11, color:'#b45309', marginTop:4 }}>กำลังจำแนกความเสียหายและสร้างบันทึก BLUF</div>
+            <div style={{ padding:'18px 14px', display:'flex', flexDirection:'column', gap:12 }}>
+              {/* Spinning AI Core Indicator */}
+              <div style={{ display:'flex', alignItems:'center', gap:10, background:'white', padding:'10px 12px', borderRadius:8, border:'1px solid var(--ct-mid)' }}>
+                <div style={{ width:24, height:24, borderRadius:'50%', border:'2.5px solid var(--ct-mid)', borderTopColor:'var(--ct-orange)', animation:'spin 0.75s linear infinite', flexShrink:0 }} />
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:'var(--ct-dark)' }}>AI Triaging in Progress…</div>
+                  <div style={{ fontSize:10.5, color:'#b45309', marginTop:1 }}>กำลังประมวลผลข้อมูลและจำแนกความเสียหาย</div>
+                </div>
+              </div>
+
+              {/* Step Progression Ticker */}
+              <div style={{ background:'white', border:'1px solid var(--ct-mid)', borderRadius:8, padding:'10px 12px', display:'flex', flexDirection:'column', gap:7 }}>
+                <LoadingStepItem active={loadingStep === 0} done={loadingStep > 0} text="1. Parsing dialogue & Thai entity extraction" />
+                <LoadingStepItem active={loadingStep === 1} done={loadingStep > 1} text="2. Classifying furniture damage & SLA routing" />
+                <LoadingStepItem active={loadingStep === 2} done={false} text="3. Generating 3-line BLUF note & mood score" />
+              </div>
+
+              {/* Shimmer Placeholder Skeletons */}
+              <div style={{ display:'flex', flexDirection:'column', gap:6, opacity:0.6 }}>
+                <div style={{ height:14, width:'45%', borderRadius:4, background:'var(--ct-mid)', animation:'pulse 1.2s ease-in-out infinite' }} />
+                <div style={{ height:32, width:'100%', borderRadius:6, background:'white', border:'1px solid var(--ct-mid)', animation:'pulse 1.2s ease-in-out infinite' }} />
+                <div style={{ height:48, width:'100%', borderRadius:6, background:'white', border:'1px solid var(--ct-mid)', animation:'pulse 1.2s ease-in-out infinite' }} />
+              </div>
             </div>
           )}
 
@@ -456,6 +495,31 @@ function EditField({ label, children }) {
     <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
       <div style={{ fontSize:10, fontWeight:600, color:'var(--ct-dark)', textTransform:'uppercase', letterSpacing:'0.06em' }}>{label}</div>
       {children}
+    </div>
+  )
+}
+
+function LoadingStepItem({ active, done, text }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11 }}>
+      <span style={{
+        width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 9, fontWeight: 800,
+        background: done ? '#22c55e' : active ? 'var(--ct-orange)' : '#e2e8f0',
+        color: done || active ? 'white' : '#94a3b8',
+        boxShadow: active ? '0 0 6px rgba(255,107,0,0.4)' : 'none',
+        transition: 'all 0.3s ease',
+      }}>
+        {done ? '✓' : active ? '●' : '○'}
+      </span>
+      <span style={{
+        color: active ? 'var(--ct-dark)' : done ? '#15803d' : '#94a3b8',
+        fontWeight: active || done ? 600 : 400,
+        transition: 'color 0.3s ease',
+      }}>
+        {text}
+      </span>
     </div>
   )
 }
