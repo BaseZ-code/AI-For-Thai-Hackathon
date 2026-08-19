@@ -20,6 +20,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
 
   // Audio Upload / Live Recording state
   const [audioFile, setAudioFile] = useState(null)
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState(null)
   const [audioUploading, setAudioUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef(null)
@@ -27,50 +28,118 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
   // In-Browser Live Mic Recording State
   const [isRecording, setIsRecording] = useState(false)
   const [recordSeconds, setRecordSeconds] = useState(0)
+  const [audioLevel, setAudioLevel] = useState(0) // 0 - 100 for live visualizer
+  const [micStatus, setMicStatus] = useState('idle') // 'idle' | 'requesting' | 'recording' | 'recorded'
+
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
   const timerIntervalRef = useRef(null)
+  const animFrameRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const analyserRef = useRef(null)
+  const streamRef = useRef(null)
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
+      stopAllAudioTracks()
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
-      if (mediaRecorderRef.current && isRecording) {
-        mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
-      }
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+      if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl)
     }
-  }, [isRecording])
+  }, [audioPreviewUrl])
+
+  function stopAllAudioTracks() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {})
+      audioContextRef.current = null
+    }
+  }
 
   async function startRecording() {
     setError(null)
     setAudioFile(null)
+    if (audioPreviewUrl) {
+      URL.revokeObjectURL(audioPreviewUrl)
+      setAudioPreviewUrl(null)
+    }
+    setMicStatus('requesting')
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setError('Live recording requires HTTPS or localhost, which is not supported in this environment. Please use file upload instead.')
+      setError('Live microphone recording is not supported in this browser context (requires localhost or HTTPS). Please use file upload.')
+      setMicStatus('idle')
       return
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        } 
+      })
+      streamRef.current = stream
       audioChunksRef.current = []
-      
-      // Determine best supported MIME type across Chrome, Firefox, Safari
-      let mimeType = 'audio/webm'
-      let fileExt = 'webm'
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        mimeType = 'audio/webm;codecs=opus'
-        fileExt = 'webm'
-      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-        mimeType = 'audio/mp4'
-        fileExt = 'm4a'
-      } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
-        mimeType = 'audio/ogg'
-        fileExt = 'ogg'
-      } else if (MediaRecorder.isTypeSupported('audio/wav')) {
-        mimeType = 'audio/wav'
-        fileExt = 'wav'
+
+      // Setup Web Audio API visualizer
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext
+        const audioCtx = new AudioCtx()
+        audioContextRef.current = audioCtx
+        const analyser = audioCtx.createAnalyser()
+        analyser.fftSize = 256
+        analyser.smoothingTimeConstant = 0.6
+        analyserRef.current = analyser
+
+        const sourceNode = audioCtx.createMediaStreamSource(stream)
+        sourceNode.connect(analyser)
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+        const updateVisualizer = () => {
+          if (!analyserRef.current) return
+          analyserRef.current.getByteFrequencyData(dataArray)
+          let sum = 0
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i]
+          }
+          const avg = sum / dataArray.length
+          const normalized = Math.min(100, Math.round((avg / 128) * 100))
+          setAudioLevel(normalized)
+          animFrameRef.current = requestAnimationFrame(updateVisualizer)
+        }
+        updateVisualizer()
+      } catch (vizErr) {
+        console.warn('AudioContext visualizer setup failed (recording still works):', vizErr)
       }
 
-      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      // Safe MediaRecorder initialization with codec fallback
+      let mimeType = ''
+      let fileExt = 'wav'
+      if (typeof MediaRecorder !== 'undefined') {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus'
+          fileExt = 'webm'
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4'
+          fileExt = 'm4a'
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm'
+          fileExt = 'webm'
+        }
+      }
+
+      let mediaRecorder
+      try {
+        mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      } catch (_) {
+        mediaRecorder = new MediaRecorder(stream)
+      }
       mediaRecorderRef.current = mediaRecorder
 
       mediaRecorder.ondataavailable = e => {
@@ -78,29 +147,33 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
       }
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' })
-        // Use extension matched to recorded audio
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/wav' })
         const file = new File([audioBlob], `mic-recording-${Date.now()}.${fileExt === 'webm' ? 'm4a' : fileExt}`, { 
-          type: mimeType || 'audio/webm' 
+          type: mimeType || 'audio/wav' 
         })
         setAudioFile(file)
-        stream.getTracks().forEach(t => t.stop())
+        const url = URL.createObjectURL(audioBlob)
+        setAudioPreviewUrl(url)
+        setMicStatus('recorded')
+        stopAllAudioTracks()
       }
 
-      mediaRecorder.start(250) // slice every 250ms for smooth chunks
+      mediaRecorder.start(200) // 200ms slice interval
       setIsRecording(true)
+      setMicStatus('recording')
       setRecordSeconds(0)
       timerIntervalRef.current = setInterval(() => {
         setRecordSeconds(s => s + 1)
       }, 1000)
     } catch (err) {
-      console.error('Microphone access error:', err)
+      console.error('Microphone error:', err)
+      setMicStatus('idle')
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setError('Microphone permission was denied by your browser. Please click the 🔒 / 🎙️ icon in your address bar and allow Microphone access.')
+        setError('Microphone permission was denied. Please click the 🔒 icon in your browser address bar and enable Microphone access.')
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         setError('No microphone found on this device. Please connect a microphone or use file upload.')
       } else {
-        setError(`Microphone error (${err.name || 'Unknown'}): ${err.message}. Please use audio file upload.`)
+        setError(`Microphone error (${err.name || 'Error'}): ${err.message}. Please use file upload.`)
       }
     }
   }
@@ -110,6 +183,8 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
       mediaRecorderRef.current.stop()
       setIsRecording(false)
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+      setAudioLevel(0)
     }
   }
 
@@ -129,12 +204,15 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
   function handleAudioFileSelected(file) {
     if (!file) return
     const ext = file.name.split('.').pop().toLowerCase()
-    if (!['mp3', 'wav', 'm4a', 'flac', 'ogg'].includes(ext)) {
+    if (!['mp3', 'wav', 'm4a', 'flac', 'ogg', 'webm'].includes(ext)) {
       setError(`Unsupported format .${ext}. Please upload .mp3, .wav, .m4a, or .flac`)
       return
     }
     setError(null)
     setAudioFile(file)
+    if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl)
+    setAudioPreviewUrl(URL.createObjectURL(file))
+    setMicStatus('recorded')
   }
 
   async function handleUploadAudioAndAnalyze() {
@@ -176,7 +254,7 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
         position: 'fixed', inset: 0, zIndex: 200,
         background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(3px)',
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        paddingTop: 45,
+        paddingTop: 40,
       }}
     >
       <div style={{
@@ -300,61 +378,120 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
           {activeTab === 'audio' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               
-              {/* Option 1: In-Browser Microphone Recorder */}
+              {/* Option 1: In-Browser Microphone Live Recorder + Audio VU Visualizer */}
               <div style={{
-                background: isRecording ? '#fef2f2' : '#f8fafc',
-                border: `1px solid ${isRecording ? '#fecaca' : '#e2e8f0'}`,
+                background: isRecording ? '#fef2f2' : (micStatus === 'requesting' ? '#fffbeb' : '#f8fafc'),
+                border: `1px solid ${isRecording ? '#fecaca' : (micStatus === 'requesting' ? '#fde68a' : '#e2e8f0')}`,
                 borderRadius: 10, padding: '16px 20px',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                display: 'flex', flexDirection: 'column', gap: 12,
                 transition: 'all 0.2s',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: '50%',
-                    background: isRecording ? '#ef4444' : '#3b82f6',
-                    color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 16,
-                    animation: isRecording ? 'pulse-red 1.2s infinite' : 'none',
-                  }}>
-                    {isRecording ? '⏺' : '🎙️'}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{
+                      width: 38, height: 38, borderRadius: '50%',
+                      background: isRecording ? '#ef4444' : (micStatus === 'requesting' ? '#f59e0b' : '#3b82f6'),
+                      color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 16,
+                      boxShadow: isRecording ? '0 0 12px rgba(239,68,68,0.5)' : 'none',
+                      animation: isRecording ? 'pulse-red 1.2s infinite' : 'none',
+                    }}>
+                      {isRecording ? '⏺' : (micStatus === 'requesting' ? '⏳' : '🎙️')}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
+                        {isRecording ? `🔴 Live Recording Voice (${fmtTime(recordSeconds)})` : (micStatus === 'requesting' ? 'Requesting Mic Access…' : 'Record Thai Voice Call Directly via Mic')}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                        {isRecording ? 'Listening to voice… Speak naturally in Thai' : 'Click Start to record voice for Speech-to-Text extraction'}
+                      </div>
+                    </div>
                   </div>
+
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
-                      {isRecording ? 'Live Microphone Recording in Progress…' : 'Record Thai Voice Call Directly via Mic'}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                      {isRecording ? `Timer: ${fmtTime(recordSeconds)} · Speak naturally in Thai` : 'Click Start to simulate a live customer call session'}
-                    </div>
+                    {!isRecording ? (
+                      <button
+                        onClick={startRecording}
+                        disabled={micStatus === 'requesting'}
+                        style={{
+                          padding: '8px 18px', borderRadius: 8, border: 'none',
+                          background: micStatus === 'requesting' ? '#cbd5e1' : 'linear-gradient(135deg,#3b82f6,#1d4ed8)',
+                          color: 'white', fontSize: 12, fontWeight: 700,
+                          cursor: micStatus === 'requesting' ? 'wait' : 'pointer',
+                          boxShadow: micStatus === 'requesting' ? 'none' : '0 2px 6px rgba(59,130,246,0.3)',
+                        }}
+                      >
+                        {micStatus === 'requesting' ? 'Prompting Mic…' : '🎙️ Start Recording'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={stopRecording}
+                        style={{
+                          padding: '8px 18px', borderRadius: 8, border: 'none',
+                          background: '#ef4444',
+                          color: 'white', fontSize: 12, fontWeight: 700,
+                          cursor: 'pointer', boxShadow: '0 2px 8px rgba(239,68,68,0.4)',
+                        }}
+                      >
+                        ⏹️ Stop Recording ({fmtTime(recordSeconds)})
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <div>
-                  {!isRecording ? (
-                    <button
-                      onClick={startRecording}
-                      style={{
-                        padding: '7px 16px', borderRadius: 8, border: 'none',
-                        background: 'linear-gradient(135deg,#3b82f6,#1d4ed8)',
-                        color: 'white', fontSize: 12, fontWeight: 700,
-                        cursor: 'pointer', boxShadow: '0 2px 6px rgba(59,130,246,0.3)',
-                      }}
-                    >
-                      🎙️ Start Recording
-                    </button>
-                  ) : (
-                    <button
-                      onClick={stopRecording}
-                      style={{
-                        padding: '7px 16px', borderRadius: 8, border: 'none',
-                        background: '#ef4444',
-                        color: 'white', fontSize: 12, fontWeight: 700,
-                        cursor: 'pointer', boxShadow: '0 2px 6px rgba(239,68,68,0.35)',
-                      }}
-                    >
-                      ⏹️ Stop Recording ({fmtTime(recordSeconds)})
-                    </button>
-                  )}
-                </div>
+                {/* Real-time Voice Volume Equalizer Bars (Active during recording) */}
+                {isRecording && (
+                  <div style={{
+                    background: '#ffffff', borderRadius: 8, padding: '10px 14px',
+                    border: '1px solid #fecaca', display: 'flex', alignItems: 'center', gap: 10,
+                  }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', width: 85 }}>Voice Level:</span>
+                    
+                    {/* Animated Equalizer Bars */}
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', height: 24, gap: 4 }}>
+                      {[15, 30, 45, 60, 75, 90, 100, 85, 70, 55, 40, 25, 50, 70, 90, 60].map((barMax, i) => {
+                        const heightPct = Math.min(100, Math.max(12, Math.round((audioLevel / 100) * barMax * (1 + (i % 3) * 0.2))))
+                        return (
+                          <div
+                            key={i}
+                            style={{
+                              flex: 1,
+                              height: `${heightPct}%`,
+                              borderRadius: 3,
+                              background: heightPct > 65 
+                                ? 'linear-gradient(to top, #f59e0b, #ef4444)' 
+                                : 'linear-gradient(to top, #3b82f6, #60a5fa)',
+                              transition: 'height 0.08s ease',
+                            }}
+                          />
+                        )
+                      })}
+                    </div>
+
+                    <span style={{ fontSize: 11, fontWeight: 700, color: audioLevel > 20 ? '#16a34a' : '#9ca3af', minWidth: 45, textAlign: 'right' }}>
+                      {audioLevel > 15 ? '🟢 Speaking' : '⚪ Silence'}
+                    </span>
+                  </div>
+                )}
+
+                {/* Recorded Audio Preview & Playback Player */}
+                {audioPreviewUrl && !isRecording && (
+                  <div style={{
+                    background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8,
+                    padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 18 }}>🎧</span>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#166534' }}>
+                          Voice Recorded ({audioFile ? (audioFile.size / 1024).toFixed(1) + ' KB' : 'Ready'})
+                        </div>
+                        <div style={{ fontSize: 10, color: '#15803d' }}>Ready to transcribe via Google Cloud ASR</div>
+                      </div>
+                    </div>
+                    <audio controls src={audioPreviewUrl} style={{ height: 32, maxWidth: 260 }} />
+                  </div>
+                )}
               </div>
 
               {/* Option 2: Drag & Drop File Upload */}
@@ -368,24 +505,24 @@ export default function TranscriptUploader({ onLoad, onAudioAnalyze, onClose, hi
                 }}
                 onClick={() => fileInputRef.current?.click()}
                 style={{
-                  border: `2px dashed ${dragOver ? 'var(--ct-orange)' : (audioFile ? '#22c55e' : '#cbd5e1')}`,
-                  borderRadius: 10, padding: '24px 20px', textAlign: 'center',
-                  background: dragOver ? 'var(--ct-lt)' : (audioFile ? '#f0fdf4' : '#fafafa'),
+                  border: `2px dashed ${dragOver ? 'var(--ct-orange)' : (audioFile && !isRecording ? '#22c55e' : '#cbd5e1')}`,
+                  borderRadius: 10, padding: '20px', textAlign: 'center',
+                  background: dragOver ? 'var(--ct-lt)' : (audioFile && !isRecording ? '#f0fdf4' : '#fafafa'),
                   cursor: 'pointer', transition: 'all 0.15s',
                 }}
               >
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="audio/mp3,audio/wav,audio/m4a,audio/flac,audio/ogg"
+                  accept="audio/mp3,audio/wav,audio/m4a,audio/flac,audio/ogg,audio/webm"
                   onChange={e => e.target.files?.[0] && handleAudioFileSelected(e.target.files[0])}
                   style={{ display: 'none' }}
                 />
-                <div style={{ fontSize: 28, marginBottom: 6 }}>{audioFile ? '🎵' : '📁'}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: audioFile ? '#16a34a' : '#1e293b' }}>
-                  {audioFile ? `Ready: ${audioFile.name}` : 'Or click to select / drop pre-recorded audio file'}
+                <div style={{ fontSize: 24, marginBottom: 4 }}>{audioFile ? '🎵' : '📁'}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: audioFile ? '#16a34a' : '#1e293b' }}>
+                  {audioFile ? `Selected: ${audioFile.name}` : 'Or click to browse / drop pre-recorded audio file'}
                 </div>
-                <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
                   {audioFile
                     ? `File size: ${(audioFile.size / (1024 * 1024)).toFixed(2)} MB · Click button below to analyze`
                     : 'Supports .mp3, .wav, .m4a, .flac (up to 10 MB)'}
