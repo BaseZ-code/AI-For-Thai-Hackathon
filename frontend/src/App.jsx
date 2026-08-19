@@ -6,7 +6,6 @@ import ContextPanel from './components/ContextPanel'
 import TranscriptUploader from './components/TranscriptUploader'
 import { extractFromMessages, extractFromAudio, checkHealth } from './lib/api'
 import { mapResponse, rawTextToMessages } from './lib/mapResponse'
-import { MOCK_RESPONSE, DEFAULT_TRANSCRIPT } from './lib/mockPayload'
 
 export default function App() {
   // ── Backend status ───────────────────────────────────────────
@@ -19,27 +18,11 @@ export default function App() {
   // ── Demo Mode (Top Tab): 'live' | 'upload' ────────────────────
   const [transcriptMode, setTranscriptMode] = useState('live')
 
-  // ── Live Interactive Messages (for 'live' mode) ───────────────
-  const [liveMessages, setLiveMessages] = useState([
-    {
-      role: 'customer',
-      content: 'ได้รับของแล้วครับ แต่เสื้อมีรอยขาดตรงแขน ทำเรื่องเคลมยังไงได้บ้างครับ แย่มากๆ เสียเวลาเลย',
-      timestamp: new Date(Date.now() - 180000).toISOString(),
-    },
-    {
-      role: 'agent',
-      content: 'ต้องขออภัยในความไม่สะดวกอย่างยิ่งเลยนะคะ รบกวนคุณลูกค้าถ่ายรูปสินค้าบริเวณที่มีรอยขาด พร้อมแจ้งเลขที่คำสั่งซื้อให้แอดมินประสานงานเคลมให้ทันทีค่ะ',
-      timestamp: new Date(Date.now() - 120000).toISOString(),
-    },
-    {
-      role: 'customer',
-      content: 'เลขที่คำสั่งซื้อ #TH98765 ครับ รูปส่งเข้าไปในแชทแล้วครับ',
-      timestamp: new Date(Date.now() - 60000).toISOString(),
-    },
-  ])
+  // ── Live Interactive Messages (starts empty — user types real messages) ──
+  const [liveMessages, setLiveMessages] = useState([])
 
   // ── Uploaded / Preset Transcript (for 'upload' mode) ──────────
-  const [transcript, setTranscript] = useState(DEFAULT_TRANSCRIPT)
+  const [transcript, setTranscript] = useState({ source: 'call_center', messages: [] })
   const [uploaderOpen, setUploaderOpen] = useState(false)
   const [transcriptHistory, setTranscriptHistory] = useState([])
 
@@ -76,7 +59,7 @@ export default function App() {
     setLiveMessages([])
   }
 
-  // ── End call handler ─────────────────────────────────────────
+  // ── End Call Handler ─────────────────────────────────────────
   async function handleEndCall() {
     if (callState === 'ended') return
     setCallState('ended')
@@ -89,17 +72,28 @@ export default function App() {
     // Determine payload based on current mode
     let targetPayload
     if (transcriptMode === 'live') {
-      const messagesToSend = liveMessages.length > 0 ? liveMessages : DEFAULT_TRANSCRIPT.messages
+      if (liveMessages.length === 0) {
+        setApiError('No messages in live chat. Please type a message before ending call.')
+        setChaiState('waiting')
+        setCallState('active')
+        return
+      }
       targetPayload = {
         source: 'other',
-        messages: messagesToSend,
+        messages: liveMessages,
       }
     } else {
+      if (!transcript.messages || transcript.messages.length === 0) {
+        setApiError('No transcript loaded. Please open "Voice & Audio Ingestion" and load a transcript or record audio.')
+        setChaiState('waiting')
+        setCallState('active')
+        return
+      }
       targetPayload = transcript
     }
 
     try {
-      // Always call the live server API directly
+      // Direct call to live backend server
       const result = await extractFromMessages(targetPayload.messages, targetPayload.source)
       setIsOffline(false)
       setRawResult(result)
@@ -109,9 +103,9 @@ export default function App() {
       console.error('ChaiToke API error:', err)
       setIsOffline(true)
       setApiError(`API error ${err.status || 500}: ${err.detail || err.title || err.message}`)
-      setRawResult(MOCK_RESPONSE)
-      setMapped(mapResponse(MOCK_RESPONSE))
-      setChaiState('results')
+      setRawResult(null)
+      setMapped(null)
+      setChaiState('waiting')
     }
   }
 
@@ -141,9 +135,9 @@ export default function App() {
       console.error('Audio extraction error:', err)
       setIsOffline(true)
       setApiError(`Audio error ${err.status || 500}: ${err.detail || err.title || err.message}`)
-      setRawResult(MOCK_RESPONSE)
-      setMapped(mapResponse(MOCK_RESPONSE))
-      setChaiState('results')
+      setRawResult(null)
+      setMapped(null)
+      setChaiState('waiting')
     }
   }
 
