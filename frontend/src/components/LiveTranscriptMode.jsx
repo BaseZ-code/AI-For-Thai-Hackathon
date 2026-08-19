@@ -268,7 +268,7 @@ export default function LiveTranscriptMode({ onLoadAndAnalyze, onLoad, disabled 
           Load only
         </button>
 
-        {/* End Call & Analyze — primary CTA */}
+        {/* End Session & Analyze — primary CTA */}
         <button onClick={handleEndCall} disabled={isEmpty} style={{
           padding:'8px 18px', borderRadius:8, border:'none',
           background: isEmpty
@@ -280,7 +280,7 @@ export default function LiveTranscriptMode({ onLoadAndAnalyze, onLoad, disabled 
           cursor: isEmpty ? 'default' : 'pointer',
           transition:'all 0.2s',
         }}>
-          📵 End Call & Analyze →
+          🛑 End Session & Analyze →
         </button>
       </div>
     </div>

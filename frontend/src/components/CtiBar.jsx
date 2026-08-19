@@ -57,7 +57,7 @@ export default function CtiBar({
           animation: ended ? 'none' : 'pulse-red 1.4s ease-in-out infinite',
           display:'inline-block',
         }} />
-        {ended ? 'Call Ended' : 'Live Call'}
+        {ended ? 'Session Ended' : 'Live Session'}
       </div>
 
       {/* Caller */}
@@ -97,7 +97,7 @@ export default function CtiBar({
         onClick={onEndCall}
         disabled={ended}
         style={{
-          display:'flex', alignItems:'center', gap:5,
+          display:'flex', alignItems:'center', gap:6,
           padding:'5px 16px', borderRadius:6,
           border: ended ? '1px solid #374151' : '1px solid var(--cti-red)',
           background: ended ? '#374151' : 'var(--cti-red)',
@@ -108,7 +108,7 @@ export default function CtiBar({
           boxShadow: ended ? 'none' : '0 2px 8px rgba(239,68,68,0.3)',
         }}
       >
-        📵 End Call
+        🛑 End Session
       </button>
     </header>
   )
