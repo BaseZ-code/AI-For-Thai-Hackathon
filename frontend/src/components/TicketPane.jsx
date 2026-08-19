@@ -217,25 +217,6 @@ export default function TicketPane({
           </div>
         )}
 
-        {/* In Upload Mode (Active): show default placeholder */}
-        {transcriptMode === 'upload' && !ended && !isLoading && (
-          <div style={{ display: 'flex', gap: 10 }}>
-            <Avatar initials="AG" gradient="linear-gradient(135deg,#f59e0b,#d97706)" size={28} />
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--zd-text-muted)', marginBottom: 4 }}>
-                <strong style={{ color: '#374151' }}>Agent (You)</strong> · just now
-              </div>
-              <div style={{
-                fontSize: 13, color: '#374151', lineHeight: 1.5,
-                background: '#ffffff', border: '1px solid var(--zd-border)',
-                borderRadius: '0 8px 8px 8px', padding: '10px 12px',
-              }}>
-                สวัสดีครับ ศูนย์บริการลูกค้าโฮมโปร 24 ชั่วโมง ยินดีให้บริการครับ วันนี้มีอะไรให้ผมดูแลครับ
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Shimmer skeleton bubbles during Loading if no messages yet */}
         {isLoading && displayMessages.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, opacity: 0.7 }}>
