@@ -35,7 +35,7 @@ const TICKET_STATUS_LABELS = {
   Awaiting_Photos:        '📸 Awaiting Photos (รอลูกค้าส่งภาพทาง LINE OA)',
 }
 
-export function mapResponse({ data, meta }) {
+export function mapResponse({ data = {}, meta = {} }) {
   const crm        = data.crm_fields       || {}
   const identity   = data.identity         || {}
   const triage     = data.issue_triage     || {}
@@ -48,27 +48,28 @@ export function mapResponse({ data, meta }) {
   const sentInfo   = SENTIMENT_EMOJI[senti.overall] || { emoji: '❓', label: senti.overall || '—' }
   const prioInfo   = PRIORITY_COLOURS[crm.priority] || { label: crm.priority || 'Normal', colour: 'blue' }
   
-  // Format BLUF note fallback if model didn't return pre-formatted text
+  // Format BLUF note fallback
   const blufFormatted = bluf.formatted_text || (
     bluf.bottom_line
       ? `[BLUF]: ${bluf.bottom_line}\n• Context: ${bluf.context || 'N/A'}\n• Next Steps: ${bluf.next_steps || 'N/A'}`
       : `[BLUF]: ${triage.incident_description || 'Customer inquiry recorded.'}\n• Status: ${acw.ticket_status || 'Pending'}\n• Action: ${acw.action_deadline || 'Within 48h'}`
   )
 
-  const phone = identity.customer_phone || crm.phone || '—'
-  const invoiceNo = identity.order_invoice_no || crm.order_id || '—'
-  const productSku = identity.product_sku_model || '—'
+  const phone = identity.customer_phone || crm.phone || null
+  const invoiceNo = identity.order_invoice_no || crm.order_id || null
+  const productSku = identity.product_sku_model || null
+  const isOfflineFallback = meta.model === 'offline-unidentified-fallback' || meta.model === 'demo-offline'
 
   return {
     // Identity fields
-    customerName:     crm.customer_name || '—',
-    phone:            phone,
-    invoiceNo:        invoiceNo,
-    productSku:       productSku,
+    customerName:     crm.customer_name || (isOfflineFallback ? '[UNIDENTIFIED_CUSTOMER]' : '—'),
+    phone:            phone || (isOfflineFallback ? '[UNIDENTIFIED_PHONE]' : '—'),
+    invoiceNo:        invoiceNo || (isOfflineFallback ? '[UNIDENTIFIED_INVOICE]' : '—'),
+    productSku:       productSku || (isOfflineFallback ? '[UNIDENTIFIED_PRODUCT]' : '—'),
 
     // Triage & Escalation
     damageType:       triage.furniture_damage_type || null,
-    damageTypeLabel:  DAMAGE_TYPE_LABELS[triage.furniture_damage_type] || triage.furniture_damage_type || null,
+    damageTypeLabel:  DAMAGE_TYPE_LABELS[triage.furniture_damage_type] || triage.furniture_damage_type || (isOfflineFallback ? '[UNIDENTIFIED_DAMAGE]' : null),
     photosReceived:   Boolean(triage.photo_evidence_received),
     incidentDesc:     triage.incident_description || null,
     
@@ -81,7 +82,7 @@ export function mapResponse({ data, meta }) {
     callDisposition:  acw.call_disposition || 'Broken_Furniture_Intake',
     ticketStatus:     acw.ticket_status || 'Pending_Inspection',
     ticketStatusLabel: TICKET_STATUS_LABELS[acw.ticket_status] || acw.ticket_status || 'Pending',
-    actionDeadline:   acw.action_deadline || 'Within 48 hours',
+    actionDeadline:   acw.action_deadline || '—',
     blufNote:         bluf,
     blufFormatted:    blufFormatted,
 
@@ -91,19 +92,19 @@ export function mapResponse({ data, meta }) {
     priorityLabel:    prioInfo.label,
     priorityColour:   prioInfo.colour,
     confidence:       intent.confidence != null ? Math.round(intent.confidence * 100) : null,
-    processingMs:     meta?.processing_time_ms ?? null,
-    isOffline:        meta?.model?.includes('offline') || false,
+    processingMs:     meta.processing_time_ms ?? null,
+    isOffline:        isOfflineFallback,
 
     // Customer Tab fields for CRM Push
     customerTabFields: {
-      name:           crm.customer_name || 'กิตติศักดิ์ พลอยงาม',
-      phone:          phone,
-      invoiceNo:      invoiceNo,
-      productSku:     productSku,
-      category:       triage.furniture_damage_type || crm.issue_category || 'Structural_Failure',
-      ticketStatus:   acw.ticket_status || 'Replacement_Dispatched',
-      escalation:     escalation.escalation_target || 'Logistics_Delivery_Team',
-      deadline:       acw.action_deadline || 'Within 48 hours',
+      name:           crm.customer_name || (isOfflineFallback ? '[UNIDENTIFIED_CUSTOMER]' : '—'),
+      phone:          phone || (isOfflineFallback ? '[UNIDENTIFIED_PHONE]' : '—'),
+      invoiceNo:      invoiceNo || (isOfflineFallback ? '[UNIDENTIFIED_INVOICE]' : '—'),
+      productSku:     productSku || (isOfflineFallback ? '[UNIDENTIFIED_PRODUCT]' : '—'),
+      category:       triage.furniture_damage_type || crm.issue_category || (isOfflineFallback ? '[UNIDENTIFIED]' : '—'),
+      ticketStatus:   acw.ticket_status || 'Pending_Inspection',
+      escalation:     escalation.escalation_target || (isOfflineFallback ? '[UNIDENTIFIED_ESCALATION]' : '—'),
+      deadline:       acw.action_deadline || '—',
       priority:       prioInfo.label,
       priorityColour: prioInfo.colour,
       sentiment:      `${sentInfo.emoji} ${sentInfo.label}`,
@@ -111,28 +112,90 @@ export function mapResponse({ data, meta }) {
     },
 
     entities: data.entities || [],
-    rawTranscript: meta?.raw_transcript || null,
+    rawTranscript: meta.raw_transcript || null,
     reconstructedTranscript: data.reconstructed_transcript || null,
   }
 }
 
 /**
- * Auto-convert raw Thai text (one message per line) into messages[]
+ * Robustly parses Thai transcripts containing [customer], [agent], [ลูกค้า], [เจ้าหน้าที่],
+ * or line-by-line tags, separating them into discrete conversation bubbles.
  */
 export function rawTextToMessages(text) {
-  return text
-    .split('\n')
-    .map(l => l.trim())
-    .filter(Boolean)
-    .map((line, i) => {
-      const agentPrefix = /^(agent|เจ้าหน้าที่|staff|แอดมิน)\s*:\s*/i
-      const isAgent = agentPrefix.test(line)
-      return {
-        role: isAgent ? 'agent' : 'customer',
-        content: line.replace(agentPrefix, '').trim(),
-        timestamp: new Date(Date.now() + i * 20000).toISOString(),
+  if (!text || typeof text !== 'string') return []
+
+  // 1. Strip redundant [transcript] prefix if present
+  let cleanText = text.replace(/^\[transcript\]\s*/i, '').trim()
+  if (!cleanText) return []
+
+  // 2. Tag replacement regex for splitting
+  // Matches tags like [customer], [agent], [ลูกค้า], [เจ้าหน้าที่], customer:, agent:, เจ้าหน้าที่:, ลูกค้า:
+  const tagPattern = /(\[(?:customer|agent|staff|แอดมิน|เจ้าหน้าที่|ลูกค้า)\]|^(?:customer|agent|staff|แอดมิน|เจ้าหน้าที่|ลูกค้า)\s*:)/gi
+
+  // Check if text has inline bracket tags like "[agent] สวัสดี [customer] มีปัญหา"
+  if (/\[(?:customer|agent|staff|แอดมิน|เจ้าหน้าที่|ลูกค้า)\]/i.test(cleanText)) {
+    // Split by bracket tags while keeping delimiters
+    const tokens = cleanText.split(/(\[(?:customer|agent|staff|แอดมิน|เจ้าหน้าที่|ลูกค้า)\])/i).filter(Boolean)
+    const messages = []
+    let currentRole = 'customer'
+
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i].trim()
+      if (!token) continue
+
+      const match = token.match(/^\[(customer|agent|staff|แอดมิน|เจ้าหน้าที่|ลูกค้า)\]$/i)
+      if (match) {
+        const rawRole = match[1].toLowerCase()
+        currentRole = (rawRole === 'agent' || rawRole === 'staff' || rawRole === 'แอดมิน' || rawRole === 'เจ้าหน้าที่')
+          ? 'agent'
+          : 'customer'
+      } else {
+        // Content block
+        messages.push({
+          role: currentRole,
+          content: token,
+          timestamp: new Date(Date.now() + messages.length * 15000).toISOString(),
+        })
       }
-    })
+    }
+
+    if (messages.length > 0) return messages
+  }
+
+  // 3. Line-by-line parsing fallback
+  const lines = cleanText.split('\n').map(l => l.trim()).filter(Boolean)
+  const result = []
+
+  lines.forEach((line, i) => {
+    const agentMatch = /^(?:\[(?:agent|staff|แอดมิน|เจ้าหน้าที่)\]|(?:agent|staff|แอดมิน|เจ้าหน้าที่)\s*:)\s*/i
+    const customerMatch = /^(?:\[(?:customer|ลูกค้า)\]|(?:customer|ลูกค้า)\s*:)\s*/i
+
+    let role = 'customer'
+    let content = line
+
+    if (agentMatch.test(line)) {
+      role = 'agent'
+      content = line.replace(agentMatch, '').trim()
+    } else if (customerMatch.test(line)) {
+      role = 'customer'
+      content = line.replace(customerMatch, '').trim()
+    } else {
+      // If no tag, alternate or default
+      role = i === 0 && line.includes('สวัสดี') && (line.includes('ยินดี') || line.includes('โฮมโปร') || line.includes('ศูนย์'))
+        ? 'agent'
+        : (i % 2 === 0 ? 'customer' : 'agent')
+    }
+
+    if (content) {
+      result.push({
+        role,
+        content,
+        timestamp: new Date(Date.now() + i * 20000).toISOString(),
+      })
+    }
+  })
+
+  return result
 }
 
 /**

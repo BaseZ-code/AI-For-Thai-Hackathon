@@ -1,66 +1,64 @@
-// Hardcoded fallback payload — HomePro Furniture 24/7 Call Center ACW & BLUF schema
+// Unidentified Debugging Mock Payload
+// Used only when backend is completely offline or fails with unhandled errors.
+// Clearly marked as UNIDENTIFIED / OFFLINE so engineers can immediately distinguish
+// mock data from live LLM responses during testing.
 export const MOCK_RESPONSE = {
   data: {
-    extraction_id: 'ext_homepro_demo',
+    extraction_id: 'ext_offline_unidentified',
     source: 'call_center',
     identity: {
-      customer_phone: '0819876543',
-      order_invoice_no: 'HP-INV-99824',
-      product_sku_model: 'โต๊ะทำงานรุ่น Loft Wood 120cm',
+      customer_phone: null,
+      order_invoice_no: null,
+      product_sku_model: null,
     },
     issue_triage: {
-      furniture_damage_type: 'Structural_Failure',
-      photo_evidence_received: true,
-      incident_description: 'แกะกล่องพบขาโต๊ะด้านขวาแตกหักครึ่งท่อนก่อนประกอบ ไม่สามารถใช้งานได้',
+      furniture_damage_type: null,
+      photo_evidence_received: false,
+      incident_description: '[UNIDENTIFIED: Backend offline or returned unparseable response]',
     },
     escalation_logic: {
       escalation_required: false,
-      escalation_target: 'Logistics_Delivery_Team',
-      escalation_reason: 'สินค้าอยู่ในเงื่อนไขรับประกัน 14 วันและมีหลักฐานภาพถ่ายครบถ้วน ดำเนินการเปลี่ยนตัวใหม่แบบ 1-to-1 ได้ทันที',
+      escalation_target: null,
+      escalation_reason: '[UNIDENTIFIED_ESCALATION]',
     },
     after_call_work: {
-      call_disposition: 'Broken_Furniture_Intake',
-      ticket_status: 'Replacement_Dispatched',
-      action_deadline: 'Within 48 hours',
+      call_disposition: 'Unidentified_Inquiry',
+      ticket_status: 'Pending_Inspection',
+      action_deadline: '—',
       bluf_note: {
-        bottom_line: 'Replacement dispatched for broken dining table (within 14-day warranty); logistics team scheduled for 1-to-1 swap.',
-        context: 'Structural Failure (cracked right leg upon unboxing). Photos verified via HomePro LINE OA. Invoice #HP-INV-99824.',
-        next_steps: 'Logistics Delivery Team to swap replacement unit at customer residence within 48 hrs.',
-        formatted_text: '[BLUF]: Replacement dispatched for broken dining table (within 14-day warranty); logistics team scheduled for 1-to-1 swap.\n• Context: Structural Failure (cracked right leg upon unboxing). Photos verified via HomePro LINE OA. Invoice #HP-INV-99824.\n• Next Steps: Logistics Delivery Team to swap replacement unit at customer residence within 48 hrs.',
+        bottom_line: '[UNIDENTIFIED_BLUF]: No live AI response received from backend.',
+        context: 'Offline Fallback triggered. Please check backend /v1/chat/analyze or /v1/audio/analyze connection.',
+        next_steps: 'Verify server status at https://team8.105app.site/v1/health.',
+        formatted_text: '[BLUF / DEBUG]: No live LLM response received.\n• Context: Backend offline or API error.\n• Next Steps: Check API logs and ensure LLM keys are configured.',
       },
     },
     intent: {
-      primary: 'complaint',
-      confidence: 0.94,
+      primary: 'general_inquiry',
+      confidence: 0.0,
     },
     sentiment: {
-      overall: 'negative',
-      score: -0.65,
+      overall: 'neutral',
+      score: 0.0,
     },
-    entities: [
-      { type: 'phone_number', value: '0819876543', span: '0819876543', pii_scrubbed: false },
-      { type: 'person_name', value: 'กิตติศักดิ์ พลอยงาม', span: 'กิตติศักดิ์ พลอยงาม', pii_scrubbed: false },
-      { type: 'order_id', value: 'HP-INV-99824', span: '#HP-INV-99824', pii_scrubbed: false },
-      { type: 'product_name', value: 'โต๊ะทำงานรุ่น Loft Wood 120cm', span: 'โต๊ะทำงานรุ่น Loft Wood 120cm', pii_scrubbed: false },
-    ],
+    entities: [],
     crm_fields: {
-      customer_name: 'กิตติศักดิ์ พลอยงาม',
-      phone: '0819876543',
+      customer_name: null,
+      phone: null,
       email: null,
-      order_id: 'HP-INV-99824',
-      issue_category: 'Structural_Failure',
-      priority: 'high',
+      order_id: null,
+      issue_category: null,
+      priority: 'normal',
     },
   },
   meta: {
-    model: 'thaillm-v1-homepro',
+    model: 'offline-unidentified-fallback',
     input_type: 'chat',
-    processing_time_ms: 320,
+    processing_time_ms: 0,
     pii_fields_scrubbed: 0,
   },
 }
 
-// Default HomePro furniture demo dialogue loaded on first open
+// Preset HomePro furniture demo dialogue (Used when clicking "Reset to HomePro Sample" in paste modal)
 export const DEFAULT_TRANSCRIPT = {
   source: 'call_center',
   messages: [

@@ -127,7 +127,7 @@ export default function App() {
   // ── Audio Upload & Transcription Handler ────────────────────
   async function handleAudioAnalyze(audioFile, source = 'call_center') {
     setCallState('ended')
-    setCallDuration('Audio File')
+    setCallDuration('Voice Audio')
     setChaiState('loading')
     setActiveTab('apps')
     setApiError(null)
@@ -135,11 +135,12 @@ export default function App() {
     try {
       const result = await extractFromAudio(audioFile, source)
       
-      // If ASR returned raw or reconstructed transcript, format into chat turns
+      // Separate reconstructed transcript into distinct customer / agent chat bubbles
       const transcriptText = result.data?.reconstructed_transcript || result.meta?.raw_transcript || ''
       if (transcriptText) {
         const msgs = rawTextToMessages(transcriptText)
         setTranscript({ source, messages: msgs })
+        setLiveMessages(msgs)
       }
 
       setRawResult(result)
