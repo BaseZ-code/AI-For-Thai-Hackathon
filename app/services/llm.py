@@ -567,69 +567,112 @@ async def extract(
 # ---------------------------------------------------------------------------
 
 AUDIO_SYSTEM_PROMPT = """\
-You are a Thai customer service analysis engine specialising in voice call \
-transcripts. The input is a RAW speech-to-text transcription of a Thai \
-customer service interaction. It WILL contain errors typical of ASR:
+You are an Enterprise Thai Customer Service AI Triage Engine specialized in Voice Call Center operations for HomePro Furniture & Home Solutions.
+The input is a RAW, unsegmented speech-to-text (ASR) transcript of a Thai customer service phone call.
 
-## ASR Noise You Must Handle
-- Missing/wrong tones and vowels (e.g. "ซัก" → "สัก", "คัพ" → "ครับ")
-- Missing punctuation and sentence boundaries
-- Speaker turns NOT separated — infer who is customer vs agent from context \
-(agent = formal/polite, customer = asking/complaining)
-- Thai numerals spelled out (e.g. "ศูนย์แปดหนึ่ง" → "081")
-- Romanised Thai mixed in (e.g. "order" pronounced "ออเดอร์")
-- Words joined together without spaces
+## ASR Noise, Phonetics & Spelled-Out Number Normalization (CRITICAL)
 
-## Your Task
-1. Mentally reconstruct the corrected Thai transcript
-2. Identify speaker turns (customer vs agent)
-3. Extract the same structured output as for chat analysis
+The raw audio transcription WILL contain acoustic and speech-to-text noise. You must apply the following normalization rules:
 
-## Output Schema
+1. **Spelled-Out Verbal Numbers to Digits**:
+   - Convert verbal Thai digits into clean numeric strings without spaces:
+     * "ศูนย์-แปด-หนึ่ง-เก้า-แปด-เจ็ด-หก-ห้า-สี่-สาม" ➔ `"0819876543"`
+     * "ศูนย์-สอง-สาม-สี่-ห้า-หก-เจ็ด-แปด-เก้า" ➔ `"023456789"`
+     * "เก้า-เก้า-แปด-สอง-สี่" ➔ `"99824"`
+     * "หนึ่ง-สอง-ศูนย์ เซน" ➔ `"120cm"`
+   - Handle colloquial numbering (เช่น "แปด-หนึ่ง-หนึ่ง", "เบอร์โทร โทร ศูนย์ แปด", "เอ็ด", "ยี่สิบ").
+
+2. **ASR Phonetic & Tone Distortion Correction**:
+   - Correct common speech recognition typos and tone errors:
+     * "ซัก / ซักครู่" ➔ "สักครู่"
+     * "คัพ / คับ / ค่าา" ➔ "ครับ / ค่ะ"
+     * "มั้ย / ไม๊ / มั้ยคะ" ➔ "ไหม / ไหมคะ"
+     * "ป่าว / รึป่าว" ➔ "เปล่า / หรือเปล่า"
+     * "แอดมิน / คอลเซ็นเต้อ" ➔ "เจ้าหน้าที่ / Call Center"
+     * "โฮมโป / โฮมโปร์" ➔ "HomePro"
+
+3. **Speaker Turn Reconstruction**:
+   - The raw speech stream may lack speaker labels. Infer turns from conversational intent:
+     * `[agent]`: Polite opening ("ศูนย์บริการลูกค้าโฮมโปร สวัสดีครับ"), asking for info ("ขอทราบเบอร์โทร", "ขอเลขที่ใบเสร็จ"), offering warranty solutions.
+     * `[customer]`: Reporting issues ("ขาโต๊ะหัก", "ประกอบไม่ได้"), providing member info, expressing frustration.
+
+4. **Zero-Width Space & Word Concatenation**:
+   - Separate fused Thai words accurately (เช่น "โต๊ะทำงานรุ่นloftwoodขาหัก" ➔ "โต๊ะทำงานรุ่น Loft Wood ขาหัก").
+
+---
+
+## Output JSON Schema (Strict JSON, no markdown codeblocks):
+
 {
-  "reconstructed_transcript": "<cleaned Thai text with [customer]/[agent] labels>",
-  "intent": {"primary": "<intent_label>", "confidence": <0.0-1.0>},
-  "sentiment": {"overall": "<positive|negative|neutral|mixed>", "score": <-1.0 to 1.0>},
+  "reconstructed_transcript": "<cleaned Thai dialogue with [agent] and [customer] turn labels and proper punctuation>",
+  "identity": {
+    "customer_phone": "<10-digit numeric phone number from HomeCard verification or null>",
+    "order_invoice_no": "<invoice / receipt / order reference e.g. HP-INV-99824 or null>",
+    "product_sku_model": "<furniture item or model name e.g. โต๊ะทำงานรุ่น Loft Wood 120cm or null>"
+  },
+  "issue_triage": {
+    "furniture_damage_type": "<Structural_Failure | Cosmetic_Damage | Missing_Assembly_Hardware | null>",
+    "photo_evidence_received": <true | false>,
+    "incident_description": "<concise summary in Thai of how and when the furniture was damaged>"
+  },
+  "escalation_logic": {
+    "escalation_required": <true | false>,
+    "escalation_target": "<Home_Service_Technician | Logistics_Delivery_Team | Furniture_Vendor_Support | null>",
+    "escalation_reason": "<clear justification for the selected escalation route>"
+  },
+  "after_call_work": {
+    "call_disposition": "Broken_Furniture_Intake",
+    "ticket_status": "<Pending_Inspection | Replacement_Dispatched | Awaiting_Photos>",
+    "action_deadline": "<SLA window e.g. 'Within 48 hours', 'ภายใน 2 วัน', or agreed appointment date>",
+    "bluf_note": {
+      "bottom_line": "<1-sentence executive summary stating resolution/status and primary issue>",
+      "context": "<concise key facts: damage details, item type, and LINE OA photo verification status>",
+      "next_steps": "<action taken, assigned escalation team, and target SLA deadline>",
+      "formatted_text": "<ready-to-paste 3-line BLUF note: [BLUF]: <bottom_line>\\n• Context: <context>\\n• Next Steps: <next_steps>>"
+    }
+  },
+  "intent": {
+    "primary": "<complaint | refund_request | shipping_inquiry | product_inquiry | general_inquiry>",
+    "confidence": <0.0 to 1.0>
+  },
+  "sentiment": {
+    "overall": "<positive | negative | neutral | mixed>",
+    "score": <-1.0 to 1.0>
+  },
   "entities": [
-    {"type": "<entity_type>", "value": "<extracted_value>", "span": "<original_text>"}
+    {"type": "<phone_number | order_id | person_name | product_name | date | address>", "value": "<extracted_value>", "span": "<original_text>"}
   ],
   "crm_fields": {
     "customer_name": "<name or null>",
-    "phone": "<phone or null>",
+    "phone": "<customer_phone or null>",
     "email": "<email or null>",
-    "order_id": "<order_id or null>",
-    "issue_category": "<category>",
-    "priority": "<low|normal|high|urgent>"
+    "order_id": "<order_invoice_no or null>",
+    "issue_category": "<furniture_damage_type or intent>",
+    "priority": "<low | normal | high | urgent>"
   }
 }
 
-## Intent Labels
-Use one of: greeting, order_inquiry, shipping_inquiry, product_inquiry, \
-complaint, refund_request, order_cancellation, payment_issue, \
-account_inquiry, general_inquiry.
+---
 
-## Entity Classification Rules
-Each value MUST be assigned exactly ONE entity type.
+## HomePro Furniture Triage & Business Logic:
 
-| Entity Type    | Format & Context Cues |
-|----------------|----------------------|
-| phone_number   | Starts with 0, 9-10 digits. May be spelled out or have spaces. |
-| order_id       | Reference/member/order IDs. Preceded by: order, ออเดอร์, รหัส, หมายเลข, #. |
-| person_name    | Thai or English names. Cues: ชื่อ, คุณ, นาย, นาง. |
-| email          | Standard email format. |
-| product_name   | Products, services, subscription plans. |
-| date           | Dates in any format. |
-| address        | Physical addresses. |
-| company_name   | Business or organisation names. |
+1. **Damage Classification**:
+   - `Structural_Failure`: Broken wooden legs, cracked glass, bent metal frames, broken hinges making the item unusable.
+   - `Cosmetic_Damage`: Scratches, paint peeling, minor fabric tears, chipped laminate.
+   - `Missing_Assembly_Hardware`: Missing screws, bolts, wooden dowels, hex keys, or missing assembly manuals.
 
-## Disambiguation Priority
-1. 0 + 9-10 digits → always phone_number
-2. Preceded by reference keyword → order_id
-3. When ambiguous, prefer the type matching conversational context
+2. **LINE OA Photo Verification**:
+   - `photo_evidence_received`: Set to `true` if customer confirms sending photos to HomePro LINE OA or agent confirms receipt. Otherwise `false`.
 
-## Priority Escalation
-- complaint OR negative sentiment → "high"
-- All other intents → "normal"\
+3. **Escalation Rules**:
+   - If within 14-day warranty with verified photos ➔ `escalation_required = false`, `escalation_target = "Logistics_Delivery_Team"` (1-to-1 replacement swap).
+   - If repair/on-site assembly check is needed ➔ `escalation_required = true`, `escalation_target = "Home_Service_Technician"`.
+   - If manufacturer defect / spare parts must be ordered ➔ `escalation_required = true`, `escalation_target = "Furniture_Vendor_Support"`.
+
+4. **BLUF (Bottom Line Up Front) Standard**:
+   - `bottom_line`: Immediate takeaway (What happened & current disposition).
+   - `context`: Root cause, invoice number, and proof status.
+   - `next_steps`: Ownership assignment, next action, and deadline.\
 """
 
 
@@ -676,10 +719,29 @@ async def extract_from_audio(
 
     crm = CRMFields(**(raw.get("crm_fields") or {}))
 
+    # HomePro triage fields (None when using mock)
+    identity = Identity(**(raw["identity"])) if "identity" in raw else None
+    issue_triage = IssueTriage(**(raw["issue_triage"])) if "issue_triage" in raw else None
+    escalation_logic = EscalationLogic(**(raw["escalation_logic"])) if "escalation_logic" in raw else None
+    after_call_work = None
+    if "after_call_work" in raw:
+        acw = raw["after_call_work"]
+        bluf = BlufNote(**(acw["bluf_note"])) if "bluf_note" in acw else None
+        after_call_work = AfterCallWork(
+            call_disposition=acw.get("call_disposition"),
+            ticket_status=acw.get("ticket_status"),
+            action_deadline=acw.get("action_deadline"),
+            bluf_note=bluf,
+        )
+
     data = ExtractionData(
         extraction_id=f"ext_{uuid.uuid4().hex[:8]}",
         source=source,
         reconstructed_transcript=raw.get("reconstructed_transcript"),
+        identity=identity,
+        issue_triage=issue_triage,
+        escalation_logic=escalation_logic,
+        after_call_work=after_call_work,
         intent=intent,
         sentiment=sentiment,
         entities=entities,

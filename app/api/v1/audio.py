@@ -11,7 +11,6 @@ from app.config import settings
 from app.schemas.response import ExtractionResponse
 from app.services import asr as asr_service
 from app.services import llm as llm_service
-from app.services import pii as pii_service
 
 logger = logging.getLogger(__name__)
 
