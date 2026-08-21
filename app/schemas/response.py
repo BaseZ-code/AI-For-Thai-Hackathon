@@ -127,7 +127,7 @@ class ExtractionData(BaseModel):
         default=None,
         description="LLM-cleaned transcript (audio pipeline only).",
     )
-    # HomePro triage fields (populated by real LLM, None in mock mode)
+    # HomePro triage fields
     identity: Identity | None = None
     issue_triage: IssueTriage | None = None
     escalation_logic: EscalationLogic | None = None

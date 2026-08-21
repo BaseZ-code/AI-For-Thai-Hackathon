@@ -25,15 +25,7 @@ _ENCODING_MAP: dict[str, str] = {
 
 ALLOWED_EXTENSIONS = set(_ENCODING_MAP.keys())
 
-# ---------------------------------------------------------------------------
-# Mock transcript for local development
-# ---------------------------------------------------------------------------
 
-_MOCK_TRANSCRIPT = (
-    "สวัสดีค่ะ ต้องการสอบถามเรื่องสินค้าที่สั่งไปค่ะ "
-    "ออเดอร์ TH55123 ค่ะ ชื่อสมศรี โทร 0812345678 "
-    "สินค้ายังไม่ได้รับเลยค่ะ สั่งไปสามวันแล้ว"
-)
 
 
 # ---------------------------------------------------------------------------
@@ -51,10 +43,6 @@ async def transcribe(
     Returns the concatenated transcript string.
     Raises ``RuntimeError`` on API errors.
     """
-    if settings.google_stt_api_key == "mock":
-        logger.info("Using MOCK ASR — returning static transcript")
-        return _MOCK_TRANSCRIPT
-
     # Determine encoding from file extension
     ext = _get_extension(filename)
     encoding = _ENCODING_MAP.get(ext)

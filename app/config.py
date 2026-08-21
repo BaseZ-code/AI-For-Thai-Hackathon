@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """Pydantic-based settings — values sourced from env vars / .env file."""
 
     # --- ThaiLLM ---------------------------------------------------------
-    thaillm_api_key: str = "mock"
+    thaillm_api_key: str = ""
     thaillm_base_url: str = "https://api.thaillm.example.com"
     thaillm_model: str = "thaillm-v1"
     thaillm_timeout_seconds: int = 30
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     pii_scrub_enabled: bool = False  # Set to True to re-enable PII scrubbing
 
     # --- Google Cloud Speech-to-Text ------------------------------------
-    google_stt_api_key: str = "mock"
+    google_stt_api_key: str = ""
     audio_max_size_mb: int = 10
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

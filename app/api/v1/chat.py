@@ -37,7 +37,7 @@ async def analyze_chat(
         for i, msg in enumerate(body.messages):
             object.__setattr__(msg, "content", scrubbed_messages[i]["content"])
 
-    # Call ThaiLLM (or mock)
+    # Call ThaiLLM
     http_client = request.app.state.http_client
     result = await llm_service.extract(
         http_client,
